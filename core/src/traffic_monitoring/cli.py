@@ -56,8 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--speed-scale",
         type=float,
-        default=0.5,
-        help="Approximate meters-per-pixel calibration for speed estimation.",
+        default=1.0,
+        help="Deprecated and currently ignored; speed uses reference line timing.",
     )
     parser.add_argument(
         "--fps-override",
@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Optional maximum number of frames to process for smoke testing.",
+    )
+    parser.add_argument(
+        "--helmet-debug",
+        action="store_true",
+        help="Draw helmet and no-helmet debug detections with confidence scores.",
     )
     return parser
 

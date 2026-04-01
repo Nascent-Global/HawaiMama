@@ -68,6 +68,7 @@ class RuntimeConfig:
     show: bool = False
     fps_override: float | None = 12.0
     frame_limit: int | None = None
+    helmet_debug: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +85,9 @@ class DetectionConfig:
     face_confidence_threshold: float = 0.50
     minimum_association_iou: float = 0.10
     minimum_rider_distance_ratio: float = 1.50
+    helmet_top_region_ratio: float = 0.45
+    helmet_overlap_threshold: float = 0.05
+    helmet_stability_frames: int = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,15 +103,12 @@ class TrackingConfig:
 
 @dataclass(frozen=True, slots=True)
 class SpeedConfig:
-    """Configuration for approximate speed estimation."""
+    """Configuration for reference-line speed estimation."""
 
     enabled: bool = True
-    meters_per_pixel: float = 0.5
-    smoothing_window: int = 7
-    minimum_history: int = 5
-    minimum_pixel_distance: float = 3.0
-    direction_consistency_window: int = 4
-    spike_ratio_threshold: float = 2.0
+    line1_y: float = 0.6
+    line2_y: float = 0.8
+    line_distance_meters: float = 10.0
     overspeed_threshold_kmh: float = 60.0
     max_reasonable_speed_kmh: float = 120.0
 
@@ -250,15 +251,13 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
             if getattr(namespace, "frame_limit", 0)
             else None
         ),
+        helmet_debug=bool(getattr(namespace, "helmet_debug", base.runtime_options.helmet_debug)),
     )
     speed = SpeedConfig(
         enabled=base.speed.enabled,
-        meters_per_pixel=float(getattr(namespace, "speed_scale", base.speed.meters_per_pixel)),
-        smoothing_window=base.speed.smoothing_window,
-        minimum_history=base.speed.minimum_history,
-        minimum_pixel_distance=base.speed.minimum_pixel_distance,
-        direction_consistency_window=base.speed.direction_consistency_window,
-        spike_ratio_threshold=base.speed.spike_ratio_threshold,
+        line1_y=base.speed.line1_y,
+        line2_y=base.speed.line2_y,
+        line_distance_meters=base.speed.line_distance_meters,
         overspeed_threshold_kmh=float(
             getattr(namespace, "overspeed_threshold", base.speed.overspeed_threshold_kmh)
         ),

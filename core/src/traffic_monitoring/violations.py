@@ -35,6 +35,7 @@ class ViolationFinding:
 @dataclass(slots=True)
 class ViolationContext:
     overspeed_threshold_kmh: float = 40.0
+    helmet_stability_frames: int = 5
     require_plate: bool = True
     plate_min_length: int = 4
     wrong_lane_track_ids: set[int] = field(default_factory=set)
@@ -96,7 +97,11 @@ def evaluate_track_violations(
         )
 
     if _label_name(track) == TrafficClass.MOTORCYCLE.value:
-        if track.helmet_state == HelmetState.ABSENT:
+        if (
+            track.helmet_state == HelmetState.ABSENT
+            and track.helmet_stable_absent_frames >= context.helmet_stability_frames
+            and (track.last_seen_frame - track.first_seen_frame + 1) >= context.helmet_stability_frames
+        ):
             findings.append(
                 ViolationFinding(
                     code=ViolationCode.NO_HELMET,
@@ -104,7 +109,10 @@ def evaluate_track_violations(
                     message="Motorcycle rider appears to be without a helmet",
                     track_id=track.track_id,
                     frame_index=frame_index,
-                    evidence={"helmet_state": track.helmet_state.value},
+                    evidence={
+                        "helmet_state": track.helmet_state.value,
+                        "stable_absent_frames": track.helmet_stable_absent_frames,
+                    },
                 )
             )
 
@@ -220,6 +228,7 @@ class ViolationEngine:
     ) -> dict[int, list[ViolationFinding]]:
         violation_context = ViolationContext(
             overspeed_threshold_kmh=self.config.speed.overspeed_threshold_kmh,
+            helmet_stability_frames=self.config.detection.helmet_stability_frames,
             require_plate=self.config.ocr.enforce_plate_rules,
             wrong_lane_track_ids=self._wrong_lane_track_ids(tracks),
             treat_unreadable_plate_as_violation=True,

@@ -175,7 +175,46 @@ def annotate_frame(
 ) -> np.ndarray:
     style = style or AnnotationStyle()
     annotated = frame.copy()
+
+    line1_y = int(context.height * 0.6)
+    line2_y = int(context.height * 0.8)
+    cv2.line(
+        annotated,
+        (0, line1_y),
+        (context.width, line1_y),
+        (0, 255, 255),
+        2,
+    )
+    cv2.line(
+        annotated,
+        (0, line2_y),
+        (context.width, line2_y),
+        (0, 0, 255),
+        2,
+    )
+    cv2.putText(
+        annotated,
+        "Line 1",
+        (12, max(20, line1_y - 8)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        annotated,
+        "Line 2",
+        (12, max(20, line2_y - 8)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 0, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
     for annotation in annotations_for_tracks(tracks, violations_by_track, style=style):
+        track = next((item for item in tracks if item.track_id == annotation.track_id), None)
         x1, y1, x2, y2 = (int(value) for value in annotation.bbox)
         cv2.rectangle(
             annotated,
@@ -227,6 +266,26 @@ def annotate_frame(
                 cv2.LINE_AA,
             )
             baseline += line_height
+
+        if track is not None:
+            for debug_box in track.debug_boxes:
+                if debug_box.get("kind") != "helmet":
+                    continue
+                dx1, dy1, dx2, dy2 = (int(value) for value in debug_box["bbox"])
+                label = str(debug_box.get("label", "")).lower()
+                confidence = float(debug_box.get("confidence", 0.0))
+                color = (0, 200, 0) if "helmet" == label or "with_helmet" == label else (0, 0, 255)
+                cv2.rectangle(annotated, (dx1, dy1), (dx2, dy2), color, 2)
+                cv2.putText(
+                    annotated,
+                    f"{label} {confidence:.2f}",
+                    (dx1, max(12, dy1 - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
 
     footer = f"Frame {context.frame_index} | {context.timestamp_seconds:.2f}s"
     cv2.putText(

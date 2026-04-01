@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import hypot
-from statistics import mean
 from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 
 import cv2
@@ -143,111 +142,60 @@ def associate_plates_to_vehicles(
     )
 
 
-def estimate_speed_kmh(
-    previous_center: tuple[float, float],
-    current_center: tuple[float, float],
-    *,
-    fps: float,
-    pixels_per_meter: float,
-    frame_interval: int = 1,
-) -> float:
-    """Estimate approximate speed in km/h using pixel displacement."""
-
-    if fps <= 0.0 or pixels_per_meter <= 0.0 or frame_interval <= 0:
-        return 0.0
-    displacement_px = hypot(
-        current_center[0] - previous_center[0],
-        current_center[1] - previous_center[1],
-    )
-    meters_moved = displacement_px / pixels_per_meter
-    seconds = frame_interval / fps
-    if seconds <= 0.0:
-        return 0.0
-    meters_per_second = meters_moved / seconds
-    return meters_per_second * 3.6
-
-
-def smooth_speed_kmh(samples: Iterable[float], *, window: int = 5) -> float | None:
-    values = [sample for sample in samples if sample is not None]
-    if not values:
-        return None
-    return mean(values[-window:])
-
-
-def update_track_speed(
+def update_track_line_crossing_speed(
     track: TrackState,
     *,
-    fps: float,
-    pixels_per_meter: float,
-    frame_interval: int = 1,
-    smoothing_window: int = 5,
-    minimum_pixel_distance: float = 0.0,
-    direction_consistency_window: int = 4,
-    spike_ratio_threshold: float = 2.0,
+    context: FrameContext,
+    line1_y: float,
+    line2_y: float,
+    line_distance_meters: float,
     max_speed_kmh: float | None = None,
 ) -> float | None:
-    """Update a track's speed estimate from its motion history."""
+    """Measure speed once using the time between two horizontal reference lines."""
 
-    if len(track.center_history) < 2:
+    if track.speed_measured or len(track.bbox_history) < 2:
         return track.estimated_speed_kmh
 
-    previous_center = track.center_history[-2]
-    current_center = track.center_history[-1]
-    displacement_px = hypot(
-        current_center[0] - previous_center[0],
-        current_center[1] - previous_center[1],
-    )
-    track.record_displacement(displacement_px)
-    if displacement_px < minimum_pixel_distance:
-        return track.estimated_speed_kmh
-    if not _movement_is_consistent(track, window=direction_consistency_window):
-        return track.estimated_speed_kmh
-    speed = estimate_speed_kmh(
-        previous_center,
-        current_center,
-        fps=fps,
-        pixels_per_meter=pixels_per_meter,
-        frame_interval=frame_interval,
-    )
-    if max_speed_kmh is not None and speed > max_speed_kmh:
-        return track.estimated_speed_kmh
-    previous_speed = track.estimated_speed_kmh
+    previous_box = track.bbox_history[-2]
+    current_box = track.bbox_history[-1]
+    previous_y = previous_box.y2 / max(float(context.height), 1.0)
+    current_y = current_box.y2 / max(float(context.height), 1.0)
+
     if (
-        previous_speed is not None
-        and previous_speed > 0.0
-        and speed > previous_speed * spike_ratio_threshold
+        not track.line1_crossed
+        and previous_y < line1_y
+        and current_y >= line1_y
     ):
+        track.line1_crossed = True
+        track.line1_crossed_at_seconds = context.timestamp_seconds
+
+    if (
+        track.line1_crossed
+        and not track.line2_crossed
+        and previous_y < line2_y
+        and current_y >= line2_y
+    ):
+        track.line2_crossed = True
+        track.line2_crossed_at_seconds = context.timestamp_seconds
+
+    if not track.line1_crossed or not track.line2_crossed:
         return track.estimated_speed_kmh
-    track.record_speed(speed)
-    track.estimated_speed_kmh = smooth_speed_kmh(
-        track.speed_history_kmh, window=smoothing_window
-    )
+
+    if track.line1_crossed_at_seconds is None or track.line2_crossed_at_seconds is None:
+        return track.estimated_speed_kmh
+
+    time_seconds = track.line2_crossed_at_seconds - track.line1_crossed_at_seconds
+    if time_seconds <= 0.0:
+        return track.estimated_speed_kmh
+
+    speed_kmh = (line_distance_meters / time_seconds) * 3.6
+    if max_speed_kmh is not None and speed_kmh > max_speed_kmh:
+        track.speed_measured = True
+        return track.estimated_speed_kmh
+
+    track.record_speed(speed_kmh)
+    track.speed_measured = True
     return track.estimated_speed_kmh
-
-
-def _movement_is_consistent(track: TrackState, *, window: int) -> bool:
-    if len(track.center_history) < window:
-        return True
-
-    recent_centers = list(track.center_history)[-window:]
-    vectors: list[tuple[float, float]] = []
-    for previous, current in zip(recent_centers, recent_centers[1:]):
-        dx = current[0] - previous[0]
-        dy = current[1] - previous[1]
-        magnitude = hypot(dx, dy)
-        if magnitude == 0.0:
-            continue
-        vectors.append((dx / magnitude, dy / magnitude))
-
-    if len(vectors) < 2:
-        return True
-
-    base_x, base_y = vectors[0]
-    for vx, vy in vectors[1:]:
-        cosine_similarity = (base_x * vx) + (base_y * vy)
-        if cosine_similarity < 0.5:
-            return False
-    return True
 
 
 def refresh_tracks(
@@ -323,17 +271,14 @@ class TrackManager:
 
             if (
                 track.label_name != "person"
-                and len(track.center_history) >= self.config.speed.minimum_history
+                and self.config.speed.enabled
             ):
-                pixels_per_meter = max(1e-6, 1.0 / self.config.speed.meters_per_pixel)
-                update_track_speed(
+                update_track_line_crossing_speed(
                     track,
-                    fps=context.fps,
-                    pixels_per_meter=pixels_per_meter,
-                    smoothing_window=self.config.speed.smoothing_window,
-                    minimum_pixel_distance=self.config.speed.minimum_pixel_distance,
-                    direction_consistency_window=self.config.speed.direction_consistency_window,
-                    spike_ratio_threshold=self.config.speed.spike_ratio_threshold,
+                    context=context,
+                    line1_y=self.config.speed.line1_y,
+                    line2_y=self.config.speed.line2_y,
+                    line_distance_meters=self.config.speed.line_distance_meters,
                     max_speed_kmh=self.config.speed.max_reasonable_speed_kmh,
                 )
             updated_ids.add(track.track_id)

@@ -171,10 +171,15 @@ class TrackState:
         default_factory=lambda: deque(maxlen=30)
     )
     bbox_history: Deque[BoundingBox] = field(default_factory=lambda: deque(maxlen=30))
-    displacement_history_px: Deque[float] = field(default_factory=lambda: deque(maxlen=20))
-    speed_history_kmh: Deque[float] = field(default_factory=lambda: deque(maxlen=20))
     estimated_speed_kmh: float | None = None
+    line1_crossed: bool = False
+    line2_crossed: bool = False
+    line1_crossed_at_seconds: float | None = None
+    line2_crossed_at_seconds: float | None = None
+    speed_measured: bool = False
     helmet_state: HelmetState = HelmetState.UNKNOWN
+    helmet_stable_absent_frames: int = 0
+    helmet_stable_present_frames: int = 0
     plate_state: PlateState = PlateState.UNKNOWN
     plate_text: str | None = None
     plate_confidence: float | None = None
@@ -183,6 +188,7 @@ class TrackState:
     face_confidence: float | None = None
     associated_person_ids: set[int] = field(default_factory=set)
     active_violation_codes: set[str] = field(default_factory=set)
+    debug_boxes: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -214,19 +220,10 @@ class TrackState:
         self.metadata.update(detection.metadata)
 
     def record_speed(self, speed_kmh: float | None) -> None:
-        if speed_kmh is None:
-            return
-        self.speed_history_kmh.append(speed_kmh)
         self.estimated_speed_kmh = speed_kmh
 
-    def record_displacement(self, displacement_px: float) -> None:
-        self.displacement_history_px.append(displacement_px)
-
     def smoothed_speed(self, window: int = 5) -> float | None:
-        samples = list(self.speed_history_kmh)[-window:]
-        if not samples:
-            return self.estimated_speed_kmh
-        return mean(samples)
+        return self.estimated_speed_kmh
 
     def age_in_frames(self, current_frame: int) -> int:
         return max(0, current_frame - self.last_seen_frame)
@@ -247,9 +244,16 @@ class TrackState:
     def mark_helmet_state(self, state: HelmetState) -> None:
         self.helmet_state = state
 
+    def set_helmet_counters(self, *, absent_frames: int, present_frames: int) -> None:
+        self.helmet_stable_absent_frames = absent_frames
+        self.helmet_stable_present_frames = present_frames
+
     def mark_face(self, bbox: BoundingBox | None, confidence: float | None) -> None:
         self.face_bbox = bbox
         self.face_confidence = confidence
+
+    def bottom_center(self) -> tuple[float, float]:
+        return ((self.bbox.x1 + self.bbox.x2) / 2.0, self.bbox.y2)
 
     def attach_person(self, person_track_id: int) -> None:
         self.associated_person_ids.add(person_track_id)

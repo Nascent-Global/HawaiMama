@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "traffic-monitoring"
+version = "0.1.0"
+description = "Hackathon scaffold for a modular traffic violation monitoring system."
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+  "ultralytics>=8.3.0",
+  "opencv-python>=4.10.0.84",
+  "numpy>=1.26.4",
+  "easyocr>=1.7.2",
+  "lap>=0.5.12",
+]
+
+[project.scripts]
+traffic-monitor = "traffic_monitoring.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "ruff>=0.6.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

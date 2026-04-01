@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Project outputs
+output/
+models/
+*.pt
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Local scratch files
+*.log
+*.tmp
+.obsidian
+docs/
+todo.md

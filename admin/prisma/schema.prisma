@@ -1,0 +1,19 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Violation {
+  id          Int      @id @default(autoincrement())
+  plateNumber String
+  type        String
+  location    String
+  timestamp   DateTime @default(now())
+  imageUrl    String?
+  videoUrl    String?
+  status      String   @default("pending")
+}

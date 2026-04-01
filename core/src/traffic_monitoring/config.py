@@ -66,7 +66,7 @@ class RuntimeConfig:
     """Non-path runtime options."""
 
     show: bool = False
-    fps_override: float | None = None
+    fps_override: float | None = 12.0
     frame_limit: int | None = None
 
 
@@ -102,11 +102,14 @@ class SpeedConfig:
     """Configuration for approximate speed estimation."""
 
     enabled: bool = True
-    meters_per_pixel: float = 0.05
-    smoothing_window: int = 5
-    minimum_history: int = 3
-    overspeed_threshold_kmh: float = 40.0
-    max_reasonable_speed_kmh: float = 180.0
+    meters_per_pixel: float = 0.5
+    smoothing_window: int = 7
+    minimum_history: int = 5
+    minimum_pixel_distance: float = 3.0
+    direction_consistency_window: int = 4
+    spike_ratio_threshold: float = 2.0
+    overspeed_threshold_kmh: float = 60.0
+    max_reasonable_speed_kmh: float = 120.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +256,9 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
         meters_per_pixel=float(getattr(namespace, "speed_scale", base.speed.meters_per_pixel)),
         smoothing_window=base.speed.smoothing_window,
         minimum_history=base.speed.minimum_history,
+        minimum_pixel_distance=base.speed.minimum_pixel_distance,
+        direction_consistency_window=base.speed.direction_consistency_window,
+        spike_ratio_threshold=base.speed.spike_ratio_threshold,
         overspeed_threshold_kmh=float(
             getattr(namespace, "overspeed_threshold", base.speed.overspeed_threshold_kmh)
         ),

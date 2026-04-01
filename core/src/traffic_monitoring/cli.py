@@ -50,20 +50,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--overspeed-threshold",
         type=float,
-        default=40.0,
+        default=60.0,
         help="Overspeed threshold in km/h.",
     )
     parser.add_argument(
         "--speed-scale",
         type=float,
-        default=0.45,
-        help="Pixel-to-speed scale factor for approximate speed estimation.",
+        default=0.5,
+        help="Approximate meters-per-pixel calibration for speed estimation.",
     )
     parser.add_argument(
         "--fps-override",
         type=float,
-        default=0.0,
-        help="Override FPS when the source metadata is unreliable.",
+        default=12.0,
+        help="Effective FPS to use for speed estimation on this camera setup.",
     )
     parser.add_argument(
         "--frame-limit",

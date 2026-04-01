@@ -181,6 +181,9 @@ def update_track_speed(
     pixels_per_meter: float,
     frame_interval: int = 1,
     smoothing_window: int = 5,
+    minimum_pixel_distance: float = 0.0,
+    direction_consistency_window: int = 4,
+    spike_ratio_threshold: float = 2.0,
     max_speed_kmh: float | None = None,
 ) -> float | None:
     """Update a track's speed estimate from its motion history."""
@@ -190,6 +193,15 @@ def update_track_speed(
 
     previous_center = track.center_history[-2]
     current_center = track.center_history[-1]
+    displacement_px = hypot(
+        current_center[0] - previous_center[0],
+        current_center[1] - previous_center[1],
+    )
+    track.record_displacement(displacement_px)
+    if displacement_px < minimum_pixel_distance:
+        return track.estimated_speed_kmh
+    if not _movement_is_consistent(track, window=direction_consistency_window):
+        return track.estimated_speed_kmh
     speed = estimate_speed_kmh(
         previous_center,
         current_center,
@@ -197,13 +209,45 @@ def update_track_speed(
         pixels_per_meter=pixels_per_meter,
         frame_interval=frame_interval,
     )
-    if max_speed_kmh is not None:
-        speed = min(speed, max_speed_kmh)
+    if max_speed_kmh is not None and speed > max_speed_kmh:
+        return track.estimated_speed_kmh
+    previous_speed = track.estimated_speed_kmh
+    if (
+        previous_speed is not None
+        and previous_speed > 0.0
+        and speed > previous_speed * spike_ratio_threshold
+    ):
+        return track.estimated_speed_kmh
     track.record_speed(speed)
     track.estimated_speed_kmh = smooth_speed_kmh(
         track.speed_history_kmh, window=smoothing_window
     )
     return track.estimated_speed_kmh
+
+
+def _movement_is_consistent(track: TrackState, *, window: int) -> bool:
+    if len(track.center_history) < window:
+        return True
+
+    recent_centers = list(track.center_history)[-window:]
+    vectors: list[tuple[float, float]] = []
+    for previous, current in zip(recent_centers, recent_centers[1:]):
+        dx = current[0] - previous[0]
+        dy = current[1] - previous[1]
+        magnitude = hypot(dx, dy)
+        if magnitude == 0.0:
+            continue
+        vectors.append((dx / magnitude, dy / magnitude))
+
+    if len(vectors) < 2:
+        return True
+
+    base_x, base_y = vectors[0]
+    for vx, vy in vectors[1:]:
+        cosine_similarity = (base_x * vx) + (base_y * vy)
+        if cosine_similarity < 0.5:
+            return False
+    return True
 
 
 def refresh_tracks(
@@ -287,6 +331,9 @@ class TrackManager:
                     fps=context.fps,
                     pixels_per_meter=pixels_per_meter,
                     smoothing_window=self.config.speed.smoothing_window,
+                    minimum_pixel_distance=self.config.speed.minimum_pixel_distance,
+                    direction_consistency_window=self.config.speed.direction_consistency_window,
+                    spike_ratio_threshold=self.config.speed.spike_ratio_threshold,
                     max_speed_kmh=self.config.speed.max_reasonable_speed_kmh,
                 )
             updated_ids.add(track.track_id)

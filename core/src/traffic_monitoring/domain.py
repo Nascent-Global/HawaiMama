@@ -171,6 +171,7 @@ class TrackState:
         default_factory=lambda: deque(maxlen=30)
     )
     bbox_history: Deque[BoundingBox] = field(default_factory=lambda: deque(maxlen=30))
+    displacement_history_px: Deque[float] = field(default_factory=lambda: deque(maxlen=20))
     speed_history_kmh: Deque[float] = field(default_factory=lambda: deque(maxlen=20))
     estimated_speed_kmh: float | None = None
     helmet_state: HelmetState = HelmetState.UNKNOWN
@@ -181,6 +182,7 @@ class TrackState:
     face_bbox: BoundingBox | None = None
     face_confidence: float | None = None
     associated_person_ids: set[int] = field(default_factory=set)
+    active_violation_codes: set[str] = field(default_factory=set)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -216,6 +218,9 @@ class TrackState:
             return
         self.speed_history_kmh.append(speed_kmh)
         self.estimated_speed_kmh = speed_kmh
+
+    def record_displacement(self, displacement_px: float) -> None:
+        self.displacement_history_px.append(displacement_px)
 
     def smoothed_speed(self, window: int = 5) -> float | None:
         samples = list(self.speed_history_kmh)[-window:]
@@ -266,6 +271,7 @@ class TrackState:
             "plate_text": self.plate_text,
             "plate_confidence": self.plate_confidence,
             "associated_person_ids": sorted(self.associated_person_ids),
+            "active_violation_codes": sorted(self.active_violation_codes),
             "metadata": dict(self.metadata),
         }
 

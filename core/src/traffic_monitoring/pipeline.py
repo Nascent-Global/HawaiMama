@@ -121,7 +121,7 @@ class TrafficMonitoringPipeline:
                     findings_by_track,
                 )
                 sink.write(annotated)
-                self.recorder.record(context, tracks, findings_by_track)
+                self.recorder.record(context, tracks, self.violation_engine.new_findings)
                 if self.config.runtime_options.show:
                     cv2.imshow("traffic-monitor", annotated)
                     if cv2.waitKey(1) & 0xFF == ord("q"):

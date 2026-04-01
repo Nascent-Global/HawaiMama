@@ -203,10 +203,15 @@ class ViolationEngine:
     def __init__(self, config: TrafficMonitoringConfig) -> None:
         self.config = config
         self._current_findings: dict[int, list[ViolationFinding]] = {}
+        self._new_findings: dict[int, list[ViolationFinding]] = {}
 
     @property
     def current_findings(self) -> dict[int, list[ViolationFinding]]:
         return self._current_findings
+
+    @property
+    def new_findings(self) -> dict[int, list[ViolationFinding]]:
+        return self._new_findings
 
     def evaluate(
         self,
@@ -221,16 +226,24 @@ class ViolationEngine:
         )
 
         findings: list[ViolationFinding] = []
+        new_findings: list[ViolationFinding] = []
         for track in tracks:
             per_track = evaluate_track_violations(
                 track,
                 violation_context,
                 frame_index=context.frame_index,
             )
-            track.metadata["violations"] = [finding.code.value for finding in per_track]
+            current_codes = {finding.code.value for finding in per_track}
+            previous_codes = set(track.active_violation_codes)
+            track.active_violation_codes = current_codes
+            track.metadata["violations"] = sorted(current_codes)
             findings.extend(per_track)
+            new_findings.extend(
+                finding for finding in per_track if finding.code.value not in previous_codes
+            )
 
         self._current_findings = findings_by_track(findings)
+        self._new_findings = findings_by_track(new_findings)
         return self._current_findings
 
     def _wrong_lane_track_ids(self, tracks: Sequence[TrackState]) -> set[int]:

@@ -84,6 +84,10 @@ class TrafficMonitoringPipeline:
         self.face_capture = FaceCaptureAnalyzer(config, self.face_detector)
         self.violation_engine = ViolationEngine(config)
         self.recorder = ViolationRecorder(config.runtime.records_path)
+        self.last_context: FrameContext | None = None
+        self.last_tracks = []
+        self.last_findings_by_track: dict[int, list] = {}
+        self.last_new_findings: dict[int, list] = {}
 
     def run(self) -> RunSummary:
         ensure_output_directories(self.config)
@@ -155,6 +159,10 @@ class TrafficMonitoringPipeline:
         self.face_capture.enrich_tracks(frame, tracks)
         self.plate_recognizer.enrich_tracks(frame, tracks)
         findings_by_track = self.violation_engine.evaluate(context, tracks)
+        self.last_context = context
+        self.last_tracks = list(tracks)
+        self.last_findings_by_track = findings_by_track
+        self.last_new_findings = self.violation_engine.new_findings
 
         annotated = annotate_frame(
             frame,

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 from collections.abc import Iterator
+from pathlib import Path
 
 import cv2
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from traffic_monitoring.config import TrafficMonitoringConfig, build_default_config
 from traffic_monitoring.pipeline import TrafficMonitoringPipeline
@@ -14,6 +16,9 @@ from traffic_monitoring.violations import ViolationCode
 
 
 app = FastAPI(title="Traffic Monitoring Stream Server")
+_base_config = build_default_config()
+_base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_dir)), name="snapshots")
 
 cameras = {
     "cam1": "input.mp4",
@@ -44,11 +49,40 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
     return source, replace(config, runtime=runtime)
 
 
+def _save_snapshot(
+    *,
+    camera_id: str,
+    config: TrafficMonitoringConfig,
+    track,
+    context_time: float,
+    violation: str,
+    frame,
+) -> str | None:
+    if frame is None:
+        return None
+    bbox = track.bbox.clamp(frame.shape[1], frame.shape[0])
+    x1, y1, x2, y2 = (int(value) for value in bbox.as_tuple())
+    if x2 <= x1 or y2 <= y1:
+        return None
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return None
+
+    config.runtime.snapshots_dir.mkdir(parents=True, exist_ok=True)
+    timestamp_tag = f"{context_time:.3f}".replace(".", "_")
+    filename = f"{camera_id}_{track.track_id}_{violation}_{timestamp_tag}.jpg"
+    snapshot_path = config.runtime.snapshots_dir / filename
+    if not cv2.imwrite(str(snapshot_path), crop):
+        return None
+    return f"/snapshots/{camera_id}/snapshots/{filename}"
+
+
 def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> None:
     context = pipeline.last_context
     if context is None:
         return
 
+    _, config = _camera_config(camera_id)
     tracks_by_id = {track.track_id: track for track in pipeline.last_tracks}
     for track_id, findings in pipeline.last_new_findings.items():
         track = tracks_by_id.get(track_id)
@@ -63,6 +97,14 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
             if event_key in _seen_event_keys:
                 continue
             _seen_event_keys.add(event_key)
+            image_path = _save_snapshot(
+                camera_id=camera_id,
+                config=config,
+                track=track,
+                context_time=timestamp,
+                violation=violation,
+                frame=pipeline.last_frame,
+            )
             events.append(
                 {
                     "camera": camera_id,
@@ -71,6 +113,7 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
                     "vehicle": track.label_name,
                     "plate": track.plate_text,
                     "violation": violation,
+                    "image": image_path,
                 }
             )
 

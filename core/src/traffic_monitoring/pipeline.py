@@ -88,6 +88,7 @@ class TrafficMonitoringPipeline:
         self.last_tracks = []
         self.last_findings_by_track: dict[int, list] = {}
         self.last_new_findings: dict[int, list] = {}
+        self.last_frame: np.ndarray | None = None
 
     def run(self) -> RunSummary:
         ensure_output_directories(self.config)
@@ -163,6 +164,7 @@ class TrafficMonitoringPipeline:
         self.last_tracks = list(tracks)
         self.last_findings_by_track = findings_by_track
         self.last_new_findings = self.violation_engine.new_findings
+        self.last_frame = frame.copy()
 
         annotated = annotate_frame(
             frame,

@@ -170,14 +170,16 @@ def annotate_frame(
     tracks: Sequence[TrackState],
     context: FrameContext,
     violations_by_track: dict[int, Sequence[ViolationFinding]] | None = None,
+    line1_y_ratio: float = 0.65,
+    line2_y_ratio: float = 0.75,
     *,
     style: AnnotationStyle | None = None,
 ) -> np.ndarray:
     style = style or AnnotationStyle()
     annotated = frame.copy()
 
-    line1_y = int(context.height * 0.6)
-    line2_y = int(context.height * 0.8)
+    line1_y = int(context.height * line1_y_ratio)
+    line2_y = int(context.height * line2_y_ratio)
     cv2.line(
         annotated,
         (0, line1_y),

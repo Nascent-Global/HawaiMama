@@ -149,6 +149,7 @@ def update_track_line_crossing_speed(
     line1_y: float,
     line2_y: float,
     line_distance_meters: float,
+    line_tolerance_pixels: int,
     max_speed_kmh: float | None = None,
 ) -> float | None:
     """Measure speed once using the time between two horizontal reference lines."""
@@ -158,25 +159,64 @@ def update_track_line_crossing_speed(
 
     previous_box = track.bbox_history[-2]
     current_box = track.bbox_history[-1]
-    previous_y = previous_box.y2 / max(float(context.height), 1.0)
-    current_y = current_box.y2 / max(float(context.height), 1.0)
+    previous_y_px = previous_box.y2
+    current_y_px = current_box.y2
+    delta_y = current_y_px - previous_y_px
+    track.motion_direction = "downward" if delta_y > 0 else "upward"
 
-    if (
-        not track.line1_crossed
-        and previous_y < line1_y
-        and current_y >= line1_y
-    ):
+    line1_y_px = line1_y * context.height
+    line2_y_px = line2_y * context.height
+    tolerance = float(line_tolerance_pixels)
+
+    line1_crossed = _crossed_line(
+        previous_y_px,
+        current_y_px,
+        line1_y_px,
+        tolerance,
+        direction=track.motion_direction,
+    )
+    line2_crossed = _crossed_line(
+        previous_y_px,
+        current_y_px,
+        line2_y_px,
+        tolerance,
+        direction=track.motion_direction,
+    )
+
+    if track.motion_direction == "downward":
+        first_line_name = "line1"
+        second_line_name = "line2"
+        skipped_both = previous_y_px < (line1_y_px - tolerance) and current_y_px > (line2_y_px + tolerance)
+    else:
+        first_line_name = "line2"
+        second_line_name = "line1"
+        skipped_both = previous_y_px > (line2_y_px + tolerance) and current_y_px < (line1_y_px - tolerance)
+
+    if skipped_both:
+        line1_crossed = True
+        line2_crossed = True
+
+    if not track.line1_crossed and line1_crossed:
         track.line1_crossed = True
         track.line1_crossed_at_seconds = context.timestamp_seconds
+        print(f"Track {track.track_id} crossed line1 at t={context.timestamp_seconds:.3f}")
 
-    if (
-        track.line1_crossed
-        and not track.line2_crossed
-        and previous_y < line2_y
-        and current_y >= line2_y
-    ):
+    if not track.line2_crossed and line2_crossed:
         track.line2_crossed = True
         track.line2_crossed_at_seconds = context.timestamp_seconds
+        print(f"Track {track.track_id} crossed line2 at t={context.timestamp_seconds:.3f}")
+
+    if track.first_line_crossed is None:
+        if first_line_name == "line1" and line1_crossed:
+            track.first_line_crossed = "line1"
+        elif first_line_name == "line2" and line2_crossed:
+            track.first_line_crossed = "line2"
+
+    if track.first_line_crossed is not None and track.second_line_crossed is None:
+        if second_line_name == "line1" and line1_crossed:
+            track.second_line_crossed = "line1"
+        elif second_line_name == "line2" and line2_crossed:
+            track.second_line_crossed = "line2"
 
     if not track.line1_crossed or not track.line2_crossed:
         return track.estimated_speed_kmh
@@ -184,7 +224,14 @@ def update_track_line_crossing_speed(
     if track.line1_crossed_at_seconds is None or track.line2_crossed_at_seconds is None:
         return track.estimated_speed_kmh
 
-    time_seconds = track.line2_crossed_at_seconds - track.line1_crossed_at_seconds
+    if track.motion_direction == "upward":
+        start_time = track.line2_crossed_at_seconds
+        end_time = track.line1_crossed_at_seconds
+    else:
+        start_time = track.line1_crossed_at_seconds
+        end_time = track.line2_crossed_at_seconds
+
+    time_seconds = end_time - start_time
     if time_seconds <= 0.0:
         return track.estimated_speed_kmh
 
@@ -195,7 +242,23 @@ def update_track_line_crossing_speed(
 
     track.record_speed(speed_kmh)
     track.speed_measured = True
+    track.metadata["lane"] = "left" if track.latest_center[0] < (context.width / 2.0) else "right"
     return track.estimated_speed_kmh
+
+
+def _crossed_line(
+    previous_y_px: float,
+    current_y_px: float,
+    line_y_px: float,
+    tolerance: float,
+    *,
+    direction: str,
+) -> bool:
+    lower = line_y_px - tolerance
+    upper = line_y_px + tolerance
+    if direction == "downward":
+        return previous_y_px < lower and current_y_px >= lower
+    return previous_y_px > upper and current_y_px <= upper
 
 
 def refresh_tracks(
@@ -279,6 +342,7 @@ class TrackManager:
                     line1_y=self.config.speed.line1_y,
                     line2_y=self.config.speed.line2_y,
                     line_distance_meters=self.config.speed.line_distance_meters,
+                    line_tolerance_pixels=self.config.speed.line_tolerance_pixels,
                     max_speed_kmh=self.config.speed.max_reasonable_speed_kmh,
                 )
             updated_ids.add(track.track_id)

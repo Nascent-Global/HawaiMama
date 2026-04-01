@@ -106,9 +106,10 @@ class SpeedConfig:
     """Configuration for reference-line speed estimation."""
 
     enabled: bool = True
-    line1_y: float = 0.6
-    line2_y: float = 0.8
+    line1_y: float = 0.58
+    line2_y: float = 0.70
     line_distance_meters: float = 10.0
+    line_tolerance_pixels: int = 10
     overspeed_threshold_kmh: float = 60.0
     max_reasonable_speed_kmh: float = 120.0
 

@@ -172,6 +172,9 @@ class TrackState:
     )
     bbox_history: Deque[BoundingBox] = field(default_factory=lambda: deque(maxlen=30))
     estimated_speed_kmh: float | None = None
+    motion_direction: str | None = None
+    first_line_crossed: str | None = None
+    second_line_crossed: str | None = None
     line1_crossed: bool = False
     line2_crossed: bool = False
     line1_crossed_at_seconds: float | None = None
@@ -215,8 +218,15 @@ class TrackState:
         self.last_seen_frame = frame_index
         self.record_bbox(detection.bbox)
         if not keep_speed:
-            self.speed_history_kmh.clear()
             self.estimated_speed_kmh = None
+            self.motion_direction = None
+            self.first_line_crossed = None
+            self.second_line_crossed = None
+            self.line1_crossed = False
+            self.line2_crossed = False
+            self.line1_crossed_at_seconds = None
+            self.line2_crossed_at_seconds = None
+            self.speed_measured = False
         self.metadata.update(detection.metadata)
 
     def record_speed(self, speed_kmh: float | None) -> None:

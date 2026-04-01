@@ -119,6 +119,8 @@ class TrafficMonitoringPipeline:
                     tracks,
                     context,
                     findings_by_track,
+                    line1_y_ratio=self.config.speed.line1_y,
+                    line2_y_ratio=self.config.speed.line2_y,
                 )
                 sink.write(annotated)
                 self.recorder.record(context, tracks, self.violation_engine.new_findings)

@@ -98,6 +98,10 @@ class TrafficMonitoringPipeline:
             min_green_time=config.traffic_control.min_green_time,
             max_green_time=config.traffic_control.max_green_time,
             yellow_time=config.traffic_control.yellow_time,
+            priority_queue_weight=config.traffic_control.priority_queue_weight,
+            priority_wait_weight=config.traffic_control.priority_wait_weight,
+            fairness_weight=config.traffic_control.fairness_weight,
+            max_priority_score=config.traffic_control.max_priority_score,
         )
         self.last_context: FrameContext | None = None
         self.last_tracks = []
@@ -180,7 +184,10 @@ class TrafficMonitoringPipeline:
         detections = self._detect(frame)
         tracks = self.track_manager.update(context, detections)
         lane_metrics = self.lane_assignment.evaluate(tracks, context)
-        signal_snapshot = self.signal_state_machine.update(context.timestamp_seconds)
+        signal_snapshot = self.signal_state_machine.update(
+            context.timestamp_seconds,
+            lane_metrics.lane_metrics,
+        )
         self.rider_association.assign_riders(tracks)
         self.helmet_analyzer.enrich_tracks(frame, tracks)
         self.face_capture.enrich_tracks(frame, tracks)

@@ -92,6 +92,10 @@ class TrafficControlConfig:
     max_green_time: float = 25.0
     yellow_time: float = 3.0
     initial_active_lane: str = "north"
+    priority_queue_weight: float = 2.0
+    priority_wait_weight: float = 1.0
+    fairness_weight: float = 0.1
+    max_priority_score: float = 100.0
 
 
 @dataclass(frozen=True, slots=True)

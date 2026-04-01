@@ -85,6 +85,9 @@ class TrafficControlConfig:
     """Configuration for adaptive-traffic extensions."""
 
     roi_config_path: Path
+    stop_speed_threshold_px: float = 2.0
+    stop_frames_threshold: int = 5
+    stop_line_distance_px: float = 80.0
 
 
 @dataclass(frozen=True, slots=True)

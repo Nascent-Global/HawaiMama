@@ -84,13 +84,18 @@ class TrafficMonitoringPipeline:
         self.face_capture = FaceCaptureAnalyzer(config, self.face_detector)
         self.violation_engine = ViolationEngine(config)
         self.recorder = ViolationRecorder(config.runtime.records_path)
-        self.lane_assignment = LaneAssignmentEngine(config.traffic_control.roi_config_path)
+        self.lane_assignment = LaneAssignmentEngine(
+            config.traffic_control.roi_config_path,
+            stop_speed_threshold_px=config.traffic_control.stop_speed_threshold_px,
+            stop_frames_threshold=config.traffic_control.stop_frames_threshold,
+            stop_line_distance_px=config.traffic_control.stop_line_distance_px,
+        )
         self.last_context: FrameContext | None = None
         self.last_tracks = []
         self.last_findings_by_track: dict[int, list] = {}
         self.last_new_findings: dict[int, list] = {}
         self.last_frame: np.ndarray | None = None
-        self.last_traffic_state: dict[str, dict[str, int]] = {"lane_counts": {}}
+        self.last_traffic_state: dict[str, object] = {"lane_counts": {}, "lane_metrics": {}}
 
     def run(self) -> RunSummary:
         ensure_output_directories(self.config)
@@ -165,7 +170,7 @@ class TrafficMonitoringPipeline:
         )
         detections = self._detect(frame)
         tracks = self.track_manager.update(context, detections)
-        lane_metrics = self.lane_assignment.evaluate(tracks)
+        lane_metrics = self.lane_assignment.evaluate(tracks, context)
         self.rider_association.assign_riders(tracks)
         self.helmet_analyzer.enrich_tracks(frame, tracks)
         self.face_capture.enrich_tracks(frame, tracks)

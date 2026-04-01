@@ -22,6 +22,7 @@ from traffic_monitoring.secondary import (
     HelmetComplianceAnalyzer,
 )
 from traffic_monitoring.traffic import LaneAssignmentEngine
+from traffic_monitoring.traffic import SignalStateMachine
 from traffic_monitoring.tracking import (
     PlateRecognizer,
     RiderAssociationEngine,
@@ -90,12 +91,20 @@ class TrafficMonitoringPipeline:
             stop_frames_threshold=config.traffic_control.stop_frames_threshold,
             stop_line_distance_px=config.traffic_control.stop_line_distance_px,
         )
+        lane_order = list(self.lane_assignment.rois) or [config.traffic_control.initial_active_lane]
+        self.signal_state_machine = SignalStateMachine(
+            lane_order,
+            initial_active_lane=config.traffic_control.initial_active_lane,
+            min_green_time=config.traffic_control.min_green_time,
+            max_green_time=config.traffic_control.max_green_time,
+            yellow_time=config.traffic_control.yellow_time,
+        )
         self.last_context: FrameContext | None = None
         self.last_tracks = []
         self.last_findings_by_track: dict[int, list] = {}
         self.last_new_findings: dict[int, list] = {}
         self.last_frame: np.ndarray | None = None
-        self.last_traffic_state: dict[str, object] = {"lane_counts": {}, "lane_metrics": {}}
+        self.last_traffic_state: dict[str, object] = {"lane_counts": {}, "lane_metrics": {}, "signal": {}}
 
     def run(self) -> RunSummary:
         ensure_output_directories(self.config)
@@ -171,6 +180,7 @@ class TrafficMonitoringPipeline:
         detections = self._detect(frame)
         tracks = self.track_manager.update(context, detections)
         lane_metrics = self.lane_assignment.evaluate(tracks, context)
+        signal_snapshot = self.signal_state_machine.update(context.timestamp_seconds)
         self.rider_association.assign_riders(tracks)
         self.helmet_analyzer.enrich_tracks(frame, tracks)
         self.face_capture.enrich_tracks(frame, tracks)
@@ -182,6 +192,7 @@ class TrafficMonitoringPipeline:
         self.last_new_findings = self.violation_engine.new_findings
         self.last_frame = frame.copy()
         self.last_traffic_state = lane_metrics.to_dict()
+        self.last_traffic_state["signal"] = signal_snapshot.to_dict()
 
         annotated = annotate_frame(
             frame,

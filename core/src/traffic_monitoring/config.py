@@ -88,6 +88,10 @@ class TrafficControlConfig:
     stop_speed_threshold_px: float = 2.0
     stop_frames_threshold: int = 5
     stop_line_distance_px: float = 80.0
+    min_green_time: float = 10.0
+    max_green_time: float = 25.0
+    yellow_time: float = 3.0
+    initial_active_lane: str = "north"
 
 
 @dataclass(frozen=True, slots=True)

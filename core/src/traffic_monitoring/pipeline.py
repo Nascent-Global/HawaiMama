@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from time import perf_counter
+
+import cv2
+
+from traffic_monitoring.annotations import annotate_frame
+from traffic_monitoring.config import (
+    TrafficMonitoringConfig,
+    ensure_output_directories,
+)
+from traffic_monitoring.detectors import EasyOCRReader, InferenceDetection, YOLODetector
+from traffic_monitoring.domain import FrameContext
+from traffic_monitoring.persistence import ViolationRecorder
+from traffic_monitoring.secondary import (
+    FaceCaptureAnalyzer,
+    HelmetComplianceAnalyzer,
+)
+from traffic_monitoring.tracking import (
+    PlateRecognizer,
+    RiderAssociationEngine,
+    TrackManager,
+)
+from traffic_monitoring.video import VideoSink, VideoSource
+from traffic_monitoring.violations import ViolationEngine
+
+
+@dataclass(frozen=True, slots=True)
+class RunSummary:
+    frames_processed: int
+    elapsed_seconds: float
+    output_video: Path
+
+
+class TrafficMonitoringPipeline:
+    def __init__(self, config: TrafficMonitoringConfig) -> None:
+        self.config = config
+        plate_detector_path = config.models.plate_detector
+        plate_enabled = plate_detector_path.exists()
+        helmet_enabled = config.models.helmet_detector.exists()
+        face_enabled = bool(config.models.face_detector and config.models.face_detector.exists())
+        self.detector = YOLODetector(
+            config.models.main_detector,
+            confidence=config.detection.confidence_threshold,
+        )
+        self.plate_detector = (
+            YOLODetector(
+                plate_detector_path,
+                confidence=config.detection.plate_confidence_threshold,
+            )
+            if plate_enabled
+            else None
+        )
+        self.ocr_reader = (
+            EasyOCRReader(list(config.ocr.languages))
+            if config.ocr.enabled and plate_enabled
+            else None
+        )
+        self.helmet_detector = (
+            YOLODetector(
+                config.models.helmet_detector,
+                confidence=config.detection.helmet_confidence_threshold,
+            )
+            if helmet_enabled
+            else None
+        )
+        self.face_detector = (
+            YOLODetector(
+                config.models.face_detector,
+                confidence=config.face_capture.minimum_confidence,
+            )
+            if face_enabled and config.models.face_detector is not None
+            else None
+        )
+        self.track_manager = TrackManager(config)
+        self.rider_association = RiderAssociationEngine(config)
+        self.plate_recognizer = PlateRecognizer(config, self.plate_detector, self.ocr_reader)
+        self.helmet_analyzer = HelmetComplianceAnalyzer(config, self.helmet_detector)
+        self.face_capture = FaceCaptureAnalyzer(config, self.face_detector)
+        self.violation_engine = ViolationEngine(config)
+        self.recorder = ViolationRecorder(config.runtime.records_path)
+
+    def run(self) -> RunSummary:
+        ensure_output_directories(self.config)
+        source = VideoSource(self.config.runtime.input_video)
+        metadata = source.open()
+        sink = VideoSink(self.config.output_video_path, metadata)
+        sink.open()
+
+        started_at = perf_counter()
+        frames_processed = 0
+
+        try:
+            while True:
+                frame = source.read()
+                if frame is None:
+                    break
+
+                fps = self.config.effective_fps(metadata.fps)
+                context = FrameContext(
+                    frame_index=frames_processed,
+                    fps=fps,
+                    width=metadata.width,
+                    height=metadata.height,
+                    timestamp_seconds=frames_processed / fps,
+                )
+                detections = self._detect(frame)
+                tracks = self.track_manager.update(context, detections)
+                self.rider_association.assign_riders(tracks)
+                self.helmet_analyzer.enrich_tracks(frame, tracks)
+                self.face_capture.enrich_tracks(frame, tracks)
+                self.plate_recognizer.enrich_tracks(frame, tracks)
+                findings_by_track = self.violation_engine.evaluate(context, tracks)
+
+                annotated = annotate_frame(
+                    frame,
+                    tracks,
+                    context,
+                    findings_by_track,
+                )
+                sink.write(annotated)
+                self.recorder.record(context, tracks, findings_by_track)
+                if self.config.runtime_options.show:
+                    cv2.imshow("traffic-monitor", annotated)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+                frames_processed += 1
+                if (
+                    self.config.runtime_options.frame_limit is not None
+                    and frames_processed >= self.config.runtime_options.frame_limit
+                ):
+                    break
+        finally:
+            self.recorder.flush()
+            source.close()
+            sink.close()
+            if self.config.runtime_options.show:
+                cv2.destroyAllWindows()
+
+        return RunSummary(
+            frames_processed=frames_processed,
+            elapsed_seconds=perf_counter() - started_at,
+            output_video=self.config.output_video_path,
+        )
+
+    def _detect(self, frame) -> list[InferenceDetection]:
+        classes = self.config.primary_tracked_class_ids
+        return self.detector.track(
+            frame,
+            classes=classes,
+            tracker=self.config.tracking.tracker,
+            persist=self.config.tracking.persist,
+            verbose=False,
+        )

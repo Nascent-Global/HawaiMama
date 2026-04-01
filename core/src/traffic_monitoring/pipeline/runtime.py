@@ -21,6 +21,7 @@ from traffic_monitoring.secondary import (
     FaceCaptureAnalyzer,
     HelmetComplianceAnalyzer,
 )
+from traffic_monitoring.traffic import LaneAssignmentEngine
 from traffic_monitoring.tracking import (
     PlateRecognizer,
     RiderAssociationEngine,
@@ -83,11 +84,13 @@ class TrafficMonitoringPipeline:
         self.face_capture = FaceCaptureAnalyzer(config, self.face_detector)
         self.violation_engine = ViolationEngine(config)
         self.recorder = ViolationRecorder(config.runtime.records_path)
+        self.lane_assignment = LaneAssignmentEngine(config.traffic_control.roi_config_path)
         self.last_context: FrameContext | None = None
         self.last_tracks = []
         self.last_findings_by_track: dict[int, list] = {}
         self.last_new_findings: dict[int, list] = {}
         self.last_frame: np.ndarray | None = None
+        self.last_traffic_state: dict[str, dict[str, int]] = {"lane_counts": {}}
 
     def run(self) -> RunSummary:
         ensure_output_directories(self.config)
@@ -162,6 +165,7 @@ class TrafficMonitoringPipeline:
         )
         detections = self._detect(frame)
         tracks = self.track_manager.update(context, detections)
+        lane_metrics = self.lane_assignment.evaluate(tracks)
         self.rider_association.assign_riders(tracks)
         self.helmet_analyzer.enrich_tracks(frame, tracks)
         self.face_capture.enrich_tracks(frame, tracks)
@@ -172,6 +176,7 @@ class TrafficMonitoringPipeline:
         self.last_findings_by_track = findings_by_track
         self.last_new_findings = self.violation_engine.new_findings
         self.last_frame = frame.copy()
+        self.last_traffic_state = lane_metrics.to_dict()
 
         annotated = annotate_frame(
             frame,

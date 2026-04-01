@@ -81,6 +81,13 @@ class PerformanceConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TrafficControlConfig:
+    """Configuration for adaptive-traffic extensions."""
+
+    roi_config_path: Path
+
+
+@dataclass(frozen=True, slots=True)
 class DetectionConfig:
     """Thresholds and class selection for the detection stage."""
 
@@ -158,6 +165,7 @@ class TrafficMonitoringConfig:
     runtime: RuntimePaths
     runtime_options: RuntimeConfig
     performance: PerformanceConfig
+    traffic_control: TrafficControlConfig
     detection: DetectionConfig
     tracking: TrackingConfig
     speed: SpeedConfig
@@ -191,6 +199,7 @@ def build_default_config(root: Path | None = None) -> TrafficMonitoringConfig:
     repo_root = project_root() if root is None else root.resolve()
     models_dir = repo_root / "models"
     output_dir = repo_root / "output"
+    config_dir = repo_root / "config"
 
     return TrafficMonitoringConfig(
         root=repo_root,
@@ -208,6 +217,9 @@ def build_default_config(root: Path | None = None) -> TrafficMonitoringConfig:
         ),
         runtime_options=RuntimeConfig(),
         performance=PerformanceConfig(),
+        traffic_control=TrafficControlConfig(
+            roi_config_path=config_dir / "approach_rois_input6.json",
+        ),
         detection=DetectionConfig(),
         tracking=TrackingConfig(),
         speed=SpeedConfig(),
@@ -296,6 +308,7 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
         runtime=runtime,
         runtime_options=runtime_options,
         performance=performance,
+        traffic_control=base.traffic_control,
         detection=base.detection,
         tracking=base.tracking,
         speed=speed,
@@ -332,6 +345,7 @@ __all__ = [
     "SpeedConfig",
     "TrackingConfig",
     "TrafficMonitoringConfig",
+    "TrafficControlConfig",
     "WrongLaneConfig",
     "build_default_config",
     "config_from_namespace",

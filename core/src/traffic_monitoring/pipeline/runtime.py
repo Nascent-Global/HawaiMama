@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Iterator
 
 import cv2
@@ -16,7 +16,7 @@ from traffic_monitoring.config import (
 )
 from traffic_monitoring.detectors import EasyOCRReader, InferenceDetection, YOLODetector
 from traffic_monitoring.domain import FrameContext
-from traffic_monitoring.persistence import ViolationRecorder
+from traffic_monitoring.events import ViolationRecorder, ViolationEngine
 from traffic_monitoring.secondary import (
     FaceCaptureAnalyzer,
     HelmetComplianceAnalyzer,
@@ -27,7 +27,6 @@ from traffic_monitoring.tracking import (
     TrackManager,
 )
 from traffic_monitoring.video import VideoSource
-from traffic_monitoring.violations import ViolationEngine
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,24 +108,32 @@ class TrafficMonitoringPipeline:
         video_source = VideoSource(source or self.config.runtime.input_video)
         metadata = video_source.open()
         frames_processed = 0
+        source_frame_index = 0
+        last_yielded_at = 0.0
 
         try:
             while True:
                 frame = video_source.read()
                 if frame is None:
                     break
+                if not self._should_process_frame(source_frame_index):
+                    source_frame_index += 1
+                    continue
 
                 annotated = self._process_frame(
                     frame,
                     metadata=metadata,
-                    frame_index=frames_processed,
+                    frame_index=source_frame_index,
                 )
+                self._enforce_fps_limit(last_yielded_at)
                 if self.config.runtime_options.show:
                     cv2.imshow("traffic-monitor", annotated)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
                 yield annotated
+                last_yielded_at = perf_counter()
                 frames_processed += 1
+                source_frame_index += 1
                 if (
                     self.config.runtime_options.frame_limit is not None
                     and frames_processed >= self.config.runtime_options.frame_limit
@@ -179,13 +186,73 @@ class TrafficMonitoringPipeline:
 
     def _detect(self, frame) -> list[InferenceDetection]:
         classes = self.config.primary_tracked_class_ids
-        return self.detector.track(
-            frame,
+        detection_frame, scale_x, scale_y = self._resize_for_detection(frame)
+        detections = self.detector.track(
+            detection_frame,
             classes=classes,
             tracker=self.config.tracking.tracker,
             persist=self.config.tracking.persist,
             verbose=False,
         )
+        if scale_x == 1.0 and scale_y == 1.0:
+            return detections
+        return self._rescale_detections(
+            detections,
+            scale_x=scale_x,
+            scale_y=scale_y,
+        )
+
+    def _should_process_frame(self, source_frame_index: int) -> bool:
+        return source_frame_index % self.config.performance.frame_skip == 0
+
+    def _resize_for_detection(
+        self,
+        frame: np.ndarray,
+    ) -> tuple[np.ndarray, float, float]:
+        target = self.config.performance.resolution
+        if target is None:
+            return frame, 1.0, 1.0
+        target_width, target_height = target
+        if target_width <= 0 or target_height <= 0:
+            return frame, 1.0, 1.0
+        source_height, source_width = frame.shape[:2]
+        if source_width == target_width and source_height == target_height:
+            return frame, 1.0, 1.0
+        resized = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+        scale_x = source_width / target_width
+        scale_y = source_height / target_height
+        return resized, scale_x, scale_y
+
+    def _rescale_detections(
+        self,
+        detections: list[InferenceDetection],
+        *,
+        scale_x: float,
+        scale_y: float,
+    ) -> list[InferenceDetection]:
+        rescaled: list[InferenceDetection] = []
+        for detection in detections:
+            x1, y1, x2, y2 = detection.xyxy
+            rescaled.append(
+                InferenceDetection(
+                    xyxy=(x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y),
+                    confidence=detection.confidence,
+                    class_id=detection.class_id,
+                    class_name=detection.class_name,
+                    track_id=detection.track_id,
+                )
+            )
+        return rescaled
+
+    def _enforce_fps_limit(self, last_yielded_at: float) -> None:
+        fps_limit = self.config.performance.fps_limit
+        if fps_limit is None or fps_limit <= 0 or last_yielded_at <= 0.0:
+            return
+        target_interval = 1.0 / fps_limit
+        elapsed = perf_counter() - last_yielded_at
+        remaining = target_interval - elapsed
+        if remaining > 0:
+            sleep(remaining)
 
 
 def frame_generator(

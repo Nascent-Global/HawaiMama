@@ -58,7 +58,7 @@ class OCRConfig:
     enabled: bool = True
     languages: tuple[str, ...] = ("en",)
     minimum_confidence: float = 0.35
-    enforce_plate_rules: bool = True
+    enforce_plate_rules: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +69,15 @@ class RuntimeConfig:
     fps_override: float | None = 12.0
     frame_limit: int | None = None
     helmet_debug: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PerformanceConfig:
+    """Configuration for runtime throughput controls."""
+
+    frame_skip: int = 1
+    resolution: tuple[int, int] | None = None
+    fps_limit: float | None = 12.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +157,7 @@ class TrafficMonitoringConfig:
     models: ModelPaths
     runtime: RuntimePaths
     runtime_options: RuntimeConfig
+    performance: PerformanceConfig
     detection: DetectionConfig
     tracking: TrackingConfig
     speed: SpeedConfig
@@ -197,6 +207,7 @@ def build_default_config(root: Path | None = None) -> TrafficMonitoringConfig:
             records_path=output_dir / "violations.json",
         ),
         runtime_options=RuntimeConfig(),
+        performance=PerformanceConfig(),
         detection=DetectionConfig(),
         tracking=TrackingConfig(),
         speed=SpeedConfig(),
@@ -264,12 +275,27 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
         ),
         max_reasonable_speed_kmh=base.speed.max_reasonable_speed_kmh,
     )
+    resolution_arg = getattr(namespace, "resolution", "")
+    resolution: tuple[int, int] | None = None
+    if resolution_arg:
+        width_text, height_text = str(resolution_arg).lower().split("x", maxsplit=1)
+        resolution = (int(width_text), int(height_text))
+    performance = PerformanceConfig(
+        frame_skip=max(1, int(getattr(namespace, "frame_skip", base.performance.frame_skip))),
+        resolution=resolution,
+        fps_limit=(
+            float(getattr(namespace, "fps_limit"))
+            if getattr(namespace, "fps_limit", 0.0)
+            else None
+        ),
+    )
 
     return TrafficMonitoringConfig(
         root=base.root,
         models=models,
         runtime=runtime,
         runtime_options=runtime_options,
+        performance=performance,
         detection=base.detection,
         tracking=base.tracking,
         speed=speed,
@@ -300,6 +326,7 @@ __all__ = [
     "ModelPaths",
     "OCRConfig",
     "OutputConfig",
+    "PerformanceConfig",
     "RuntimeConfig",
     "RuntimePaths",
     "SpeedConfig",

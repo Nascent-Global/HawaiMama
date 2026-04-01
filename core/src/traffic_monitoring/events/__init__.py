@@ -1,4 +1,4 @@
-from traffic_monitoring.events.logic import (
+from .logic import (
     ViolationCode,
     ViolationContext,
     ViolationEngine,
@@ -11,12 +11,14 @@ from traffic_monitoring.events.logic import (
     violation_codes,
     violation_messages,
 )
+from .store import ViolationRecorder
 
 __all__ = [
     "ViolationCode",
     "ViolationContext",
     "ViolationEngine",
     "ViolationFinding",
+    "ViolationRecorder",
     "ViolationSeverity",
     "evaluate_track_violations",
     "findings_by_track",

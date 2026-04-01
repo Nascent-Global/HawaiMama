@@ -76,6 +76,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Draw helmet and no-helmet debug detections with confidence scores.",
     )
+    parser.add_argument(
+        "--frame-skip",
+        type=int,
+        default=1,
+        help="Process every Nth frame for better throughput.",
+    )
+    parser.add_argument(
+        "--resolution",
+        type=str,
+        default="",
+        help="Optional inference resolution as WIDTHxHEIGHT, for example 1280x720.",
+    )
+    parser.add_argument(
+        "--fps-limit",
+        type=float,
+        default=12.0,
+        help="Maximum annotated output FPS for streaming or local display.",
+    )
     return parser
 
 

@@ -58,7 +58,7 @@ class OCRConfig:
     enabled: bool = True
     languages: tuple[str, ...] = ("en",)
     minimum_confidence: float = 0.35
-    enforce_plate_rules: bool = False
+    enforce_plate_rules: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +106,10 @@ class SpeedConfig:
     """Configuration for reference-line speed estimation."""
 
     enabled: bool = True
-    line1_y: float = 0.58
+    line1_y: float = 0.50
     line2_y: float = 0.70
-    line_distance_meters: float = 10.0
-    line_tolerance_pixels: int = 10
+    line_distance_meters: float = 12.0
+    line_tolerance_pixels: int = 15
     overspeed_threshold_kmh: float = 60.0
     max_reasonable_speed_kmh: float = 120.0
 

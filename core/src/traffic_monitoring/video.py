@@ -16,23 +16,30 @@ class VideoMetadata:
 
 
 class VideoSource:
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    def __init__(self, source: Path | str | cv2.VideoCapture) -> None:
+        self.source = source
         self._capture: cv2.VideoCapture | None = None
         self._metadata: VideoMetadata | None = None
+        self._owns_capture = True
 
     def open(self) -> VideoMetadata:
-        capture = cv2.VideoCapture(str(self.path))
+        if isinstance(self.source, cv2.VideoCapture):
+            capture = self.source
+            self._owns_capture = False
+        else:
+            capture = cv2.VideoCapture(str(self.source))
+            self._owns_capture = True
         if not capture.isOpened():
-            raise FileNotFoundError(f"Unable to open video input: {self.path}")
+            raise FileNotFoundError(f"Unable to open video input: {self.source}")
 
         fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
         width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
         height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
         frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         if width <= 0 or height <= 0:
-            capture.release()
-            raise ValueError(f"Video stream has invalid resolution: {self.path}")
+            if self._owns_capture:
+                capture.release()
+            raise ValueError(f"Video stream has invalid resolution: {self.source}")
 
         self._capture = capture
         self._metadata = VideoMetadata(
@@ -57,35 +64,6 @@ class VideoSource:
 
     def close(self) -> None:
         if self._capture is not None:
-            self._capture.release()
+            if self._owns_capture:
+                self._capture.release()
             self._capture = None
-
-
-class VideoSink:
-    def __init__(self, path: Path, metadata: VideoMetadata) -> None:
-        self.path = path
-        self.metadata = metadata
-        self._writer: cv2.VideoWriter | None = None
-
-    def open(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(
-            str(self.path),
-            fourcc,
-            self.metadata.fps,
-            (self.metadata.width, self.metadata.height),
-        )
-        if not writer.isOpened():
-            raise RuntimeError(f"Unable to create output video: {self.path}")
-        self._writer = writer
-
-    def write(self, frame: np.ndarray) -> None:
-        if self._writer is None:
-            raise RuntimeError("Video sink is not opened.")
-        self._writer.write(frame)
-
-    def close(self) -> None:
-        if self._writer is not None:
-            self._writer.release()
-            self._writer = None

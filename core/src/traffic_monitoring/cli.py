@@ -83,10 +83,7 @@ def main() -> int:
     args = build_parser().parse_args()
     config = config_from_namespace(args)
     summary = TrafficMonitoringPipeline(config).run()
-    print(
-        f"Processed {summary.frames_processed} frames in "
-        f"{summary.elapsed_seconds:.2f}s -> {summary.output_video}"
-    )
+    print(f"Processed {summary.frames_processed} frames in {summary.elapsed_seconds:.2f}s")
     return 0
 
 

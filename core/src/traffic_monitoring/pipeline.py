@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from typing import Iterator
 
 import cv2
+import numpy as np
 
 from traffic_monitoring.annotations import annotate_frame
 from traffic_monitoring.config import (
+    build_default_config,
     TrafficMonitoringConfig,
     ensure_output_directories,
 )
@@ -23,7 +26,7 @@ from traffic_monitoring.tracking import (
     RiderAssociationEngine,
     TrackManager,
 )
-from traffic_monitoring.video import VideoSink, VideoSource
+from traffic_monitoring.video import VideoSource
 from traffic_monitoring.violations import ViolationEngine
 
 
@@ -31,7 +34,7 @@ from traffic_monitoring.violations import ViolationEngine
 class RunSummary:
     frames_processed: int
     elapsed_seconds: float
-    output_video: Path
+    output_video: Path | None = None
 
 
 class TrafficMonitoringPipeline:
@@ -84,50 +87,40 @@ class TrafficMonitoringPipeline:
 
     def run(self) -> RunSummary:
         ensure_output_directories(self.config)
-        source = VideoSource(self.config.runtime.input_video)
-        metadata = source.open()
-        sink = VideoSink(self.config.output_video_path, metadata)
-        sink.open()
-
         started_at = perf_counter()
+        frames_processed = sum(1 for _ in self.frame_generator())
+
+        return RunSummary(
+            frames_processed=frames_processed,
+            elapsed_seconds=perf_counter() - started_at,
+            output_video=None,
+        )
+
+    def frame_generator(
+        self,
+        source: Path | str | cv2.VideoCapture | None = None,
+    ) -> Iterator[np.ndarray]:
+        ensure_output_directories(self.config)
+        video_source = VideoSource(source or self.config.runtime.input_video)
+        metadata = video_source.open()
         frames_processed = 0
 
         try:
             while True:
-                frame = source.read()
+                frame = video_source.read()
                 if frame is None:
                     break
 
-                fps = self.config.effective_fps(metadata.fps)
-                context = FrameContext(
-                    frame_index=frames_processed,
-                    fps=fps,
-                    width=metadata.width,
-                    height=metadata.height,
-                    timestamp_seconds=frames_processed / fps,
-                )
-                detections = self._detect(frame)
-                tracks = self.track_manager.update(context, detections)
-                self.rider_association.assign_riders(tracks)
-                self.helmet_analyzer.enrich_tracks(frame, tracks)
-                self.face_capture.enrich_tracks(frame, tracks)
-                self.plate_recognizer.enrich_tracks(frame, tracks)
-                findings_by_track = self.violation_engine.evaluate(context, tracks)
-
-                annotated = annotate_frame(
+                annotated = self._process_frame(
                     frame,
-                    tracks,
-                    context,
-                    findings_by_track,
-                    line1_y_ratio=self.config.speed.line1_y,
-                    line2_y_ratio=self.config.speed.line2_y,
+                    metadata=metadata,
+                    frame_index=frames_processed,
                 )
-                sink.write(annotated)
-                self.recorder.record(context, tracks, self.violation_engine.new_findings)
                 if self.config.runtime_options.show:
                     cv2.imshow("traffic-monitor", annotated)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
+                yield annotated
                 frames_processed += 1
                 if (
                     self.config.runtime_options.frame_limit is not None
@@ -136,16 +129,43 @@ class TrafficMonitoringPipeline:
                     break
         finally:
             self.recorder.flush()
-            source.close()
-            sink.close()
+            video_source.close()
             if self.config.runtime_options.show:
                 cv2.destroyAllWindows()
 
-        return RunSummary(
-            frames_processed=frames_processed,
-            elapsed_seconds=perf_counter() - started_at,
-            output_video=self.config.output_video_path,
+    def _process_frame(
+        self,
+        frame: np.ndarray,
+        *,
+        metadata,
+        frame_index: int,
+    ) -> np.ndarray:
+        fps = self.config.effective_fps(metadata.fps)
+        context = FrameContext(
+            frame_index=frame_index,
+            fps=fps,
+            width=metadata.width,
+            height=metadata.height,
+            timestamp_seconds=frame_index / fps,
         )
+        detections = self._detect(frame)
+        tracks = self.track_manager.update(context, detections)
+        self.rider_association.assign_riders(tracks)
+        self.helmet_analyzer.enrich_tracks(frame, tracks)
+        self.face_capture.enrich_tracks(frame, tracks)
+        self.plate_recognizer.enrich_tracks(frame, tracks)
+        findings_by_track = self.violation_engine.evaluate(context, tracks)
+
+        annotated = annotate_frame(
+            frame,
+            tracks,
+            context,
+            findings_by_track,
+            line1_y_ratio=self.config.speed.line1_y,
+            line2_y_ratio=self.config.speed.line2_y,
+        )
+        self.recorder.record(context, tracks, self.violation_engine.new_findings)
+        return annotated
 
     def _detect(self, frame) -> list[InferenceDetection]:
         classes = self.config.primary_tracked_class_ids
@@ -156,3 +176,11 @@ class TrafficMonitoringPipeline:
             persist=self.config.tracking.persist,
             verbose=False,
         )
+
+
+def frame_generator(
+    source: Path | str | cv2.VideoCapture,
+    config: TrafficMonitoringConfig | None = None,
+) -> Iterator[np.ndarray]:
+    pipeline = TrafficMonitoringPipeline(build_default_config() if config is None else config)
+    yield from pipeline.frame_generator(source)

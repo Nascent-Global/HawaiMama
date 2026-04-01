@@ -1,9 +1,13 @@
-import Image from "next/image";
+import AnimatedBackground from "@/components/AnimatedBackground";
+import LiveSurveillanceDashboard from "@/components/live/LiveSurveillanceDashboard";
 
 export default function Home() {
   return (
-    <div>
-      
-    </div>
+    <main className="app-shell">
+      <AnimatedBackground />
+      <div className="app-shell-inner">
+        <LiveSurveillanceDashboard />
+      </div>
+    </main>
   );
 }

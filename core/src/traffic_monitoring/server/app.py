@@ -18,9 +18,19 @@ _base_config = build_default_config()
 _base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_dir)), name="snapshots")
 
-cameras = {
-    "cam1": "input.mp4",
-    "cam2": "input2.mp4",
+cameras: dict[str, dict[str, str]] = {
+    "cam1": {
+        "id": "cam1",
+        "source": "input.mp4",
+        "location": "Lakeside",
+        "status": "online",
+    },
+    "cam2": {
+        "id": "cam2",
+        "source": "input2.mp4",
+        "location": "Highway South",
+        "status": "online",
+    },
 }
 events: list[dict[str, object]] = []
 _seen_event_keys: set[tuple[str, float, int, str]] = set()
@@ -32,9 +42,10 @@ _api_event_codes = {
 
 
 def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
-    source = cameras.get(camera_id)
-    if source is None:
+    camera = cameras.get(camera_id)
+    if camera is None:
         raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
+    source = camera["source"]
 
     config = build_default_config()
     stream_output_dir = config.runtime.output_dir / camera_id
@@ -150,3 +161,16 @@ def camera_stream(camera_id: str) -> StreamingResponse:
 @app.get("/events")
 def list_events() -> JSONResponse:
     return JSONResponse(events)
+
+
+@app.get("/cameras")
+def list_cameras() -> JSONResponse:
+    payload = [
+        {
+            "id": camera["id"],
+            "location": camera["location"],
+            "status": camera["status"],
+        }
+        for camera in cameras.values()
+    ]
+    return JSONResponse(payload)

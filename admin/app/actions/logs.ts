@@ -35,7 +35,7 @@ export async function getChallans() {
     orderBy: { metaCreatedAt: 'desc' },
   });
 
-  return data.map((c: any) => ({
+  return data.map((c) => ({
     id: c.id,
     ticket: {
       ticketNumber: c.ticketNumber,

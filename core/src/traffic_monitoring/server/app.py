@@ -1,24 +1,24 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import cv2
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from traffic_monitoring.config import TrafficMonitoringConfig, apply_input_overrides, build_default_config
 from traffic_monitoring.events import ViolationCode
 from traffic_monitoring.pipeline import TrafficMonitoringPipeline
+from traffic_monitoring.server.repository import AdminRepository, SeedPayloads, default_database_url
 from traffic_monitoring.traffic import SignalStateMachine
 
-
-app = FastAPI(title="Traffic Monitoring Stream Server")
-_base_config = build_default_config()
-_base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_dir)), name="snapshots")
 
 def _build_camera_registry() -> dict[str, dict[str, object]]:
     cameras: dict[str, dict[str, object]] = {}
@@ -52,7 +52,48 @@ def _build_camera_registry() -> dict[str, dict[str, object]]:
     return cameras
 
 
+def _load_seed_payloads(root: Path) -> SeedPayloads:
+    admin_db_dir = root.parent / "admin" / "db"
+
+    def _load_json(name: str) -> list[dict[str, object]]:
+        path = admin_db_dir / name
+        if not path.exists():
+            return []
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    return SeedPayloads(
+        violations=_load_json("mock-violations.json"),
+        accidents=_load_json("mock-accidents.json"),
+        challans=_load_json("mock-challans.json"),
+    )
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _timestamp_to_iso(timestamp_seconds: float) -> str:
+    return datetime.fromtimestamp(timestamp_seconds, tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+app = FastAPI(title="Traffic Monitoring Stream Server")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+_base_config = build_default_config()
+_base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_dir)), name="snapshots")
+app.mount("/inputs", StaticFiles(directory=str(_base_config.root / "input")), name="inputs")
+
 cameras: dict[str, dict[str, object]] = _build_camera_registry()
+repository = AdminRepository(default_database_url(), project_root=_base_config.root)
+repository.initialize(cameras, _load_seed_payloads(_base_config.root))
+
 events: list[dict[str, object]] = []
 traffic_state_by_camera: dict[str, dict[str, object]] = {}
 intersection_state_by_id: dict[str, dict[str, object]] = {}
@@ -61,6 +102,8 @@ _api_event_codes = {
     ViolationCode.OVERSPEED.value,
     ViolationCode.NO_HELMET.value,
     ViolationCode.PLATE_UNREADABLE.value,
+    ViolationCode.PLATE_MISSING.value,
+    ViolationCode.WRONG_LANE.value,
 }
 _intersection_signal_machines: dict[str, SignalStateMachine] = {}
 
@@ -151,12 +194,9 @@ def _update_intersection_state(camera_id: str, pipeline: TrafficMonitoringPipeli
     if camera is None:
         return
     intersection_id = camera.get("intersection_id")
-    if not intersection_id:
-        return
-    if pipeline.last_context is None:
+    if not intersection_id or pipeline.last_context is None:
         return
 
-    lane_metrics = pipeline.last_traffic_state.get("lane_metrics", {})
     timestamp = pipeline.last_context.timestamp_seconds
     traffic_state_by_camera[camera_id] = {
         **dict(pipeline.last_traffic_state),
@@ -245,6 +285,63 @@ def _save_snapshot(
     return f"/snapshots/{camera_id}/snapshots/{filename}"
 
 
+def _camera_location_link(camera_id: str) -> str:
+    camera = cameras.get(camera_id, {})
+    return str(
+        camera.get("location_link")
+        or f"https://maps.google.com/?q={str(camera.get('location', 'Pokhara')).replace(' ', '+')}"
+    )
+
+
+def _build_violation_record(
+    *,
+    camera_id: str,
+    track,
+    timestamp_seconds: float,
+    violation_code: str,
+    image_path: str | None,
+) -> dict[str, object]:
+    location = str(cameras.get(camera_id, {}).get("location", "Pokhara"))
+    violation_titles = {
+        "overspeed": "Overspeed Violation",
+        "no_helmet": "No Helmet Detected",
+        "wrong_lane": "Wrong Lane Violation",
+        "plate_missing": "License Plate Missing",
+        "plate_unreadable": "License Plate Unreadable",
+    }
+    now = _utc_now_iso()
+    timestamp = _timestamp_to_iso(timestamp_seconds)
+    license_plate = (track.plate_text or f"{track.label_name[:2].upper()}-{track.track_id:04d}").upper()
+    return {
+        "id": str(uuid4()),
+        "cameraId": camera_id,
+        "trackId": track.track_id,
+        "violationCode": violation_code,
+        "vehicleType": track.label_name,
+        "title": violation_titles.get(violation_code, "Traffic Violation"),
+        "driverName": f"Tracked {track.label_name.title()} {track.track_id}",
+        "age": 0,
+        "dob": "2000-01-01T00:00:00Z",
+        "bloodGroup": "Unknown",
+        "licensePlate": license_plate,
+        "tempAddress": location,
+        "permAddress": location,
+        "timestamp": timestamp,
+        "locationLink": _camera_location_link(camera_id),
+        "screenshot1Url": image_path or "",
+        "screenshot2Url": image_path or "",
+        "screenshot3Url": image_path or "",
+        "videoUrl": f"/inputs/{Path(str(cameras.get(camera_id, {}).get('source', ''))).name}",
+        "description": (
+            f"{violation_titles.get(violation_code, 'Traffic violation')} detected at "
+            f"{location}. Plate read: {track.plate_text or 'pending verification'}."
+        ),
+        "verified": False,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
 def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> None:
     context = pipeline.last_context
     if context is None:
@@ -273,16 +370,25 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
                 violation=violation,
                 frame=pipeline.last_frame,
             )
-            events.append(
-                {
-                    "camera": camera_id,
-                    "time": timestamp,
-                    "track_id": track_id,
-                    "vehicle": track.label_name,
-                    "plate": track.plate_text,
-                    "violation": violation,
-                    "image": image_path,
-                }
+            event_payload = {
+                "camera": camera_id,
+                "time": timestamp,
+                "track_id": track_id,
+                "vehicle": track.label_name,
+                "plate": track.plate_text,
+                "violation": violation,
+                "image": image_path,
+            }
+            events.append(event_payload)
+            repository.ingest_violation_event(
+                _build_violation_record(
+                    camera_id=camera_id,
+                    track=track,
+                    timestamp_seconds=timestamp,
+                    violation_code=violation,
+                    image_path=image_path,
+                ),
+                source_event_key=f"{camera_id}:{timestamp}:{track_id}:{violation}",
             )
 
 
@@ -296,10 +402,7 @@ def mjpeg_frame_generator(camera_id: str) -> Iterator[bytes]:
         if not ok:
             continue
         payload = encoded.tobytes()
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n" + payload + b"\r\n"
-        )
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + payload + b"\r\n"
 
 
 @app.get("/video_feed")
@@ -318,6 +421,11 @@ def camera_stream(camera_id: str) -> StreamingResponse:
     )
 
 
+@app.get("/surveillance/feeds")
+def surveillance_feeds() -> JSONResponse:
+    return JSONResponse(repository.list_surveillance_feeds())
+
+
 @app.get("/events")
 def list_events() -> JSONResponse:
     return JSONResponse(events)
@@ -325,15 +433,62 @@ def list_events() -> JSONResponse:
 
 @app.get("/cameras")
 def list_cameras() -> JSONResponse:
-    payload = [
-        {
-            "id": camera["id"],
-            "location": camera["location"],
-            "status": camera["status"],
-        }
-        for camera in cameras.values()
-    ]
-    return JSONResponse(payload)
+    return JSONResponse(repository.list_cameras())
+
+
+@app.get("/violations")
+def list_violations() -> JSONResponse:
+    return JSONResponse(repository.list_violations())
+
+
+@app.get("/violations/{violation_id}")
+def get_violation(violation_id: str) -> JSONResponse:
+    violation = repository.get_violation(violation_id)
+    if violation is None:
+        raise HTTPException(status_code=404, detail=f"Unknown violation: {violation_id}")
+    return JSONResponse(violation)
+
+
+@app.post("/violations/{violation_id}/verify")
+def verify_violation(violation_id: str) -> JSONResponse:
+    result = repository.verify_violation(violation_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Unknown violation: {violation_id}")
+    return JSONResponse(result)
+
+
+@app.get("/accidents")
+def list_accidents() -> JSONResponse:
+    return JSONResponse(repository.list_accidents())
+
+
+@app.get("/accidents/{accident_id}")
+def get_accident(accident_id: str) -> JSONResponse:
+    accident = repository.get_accident(accident_id)
+    if accident is None:
+        raise HTTPException(status_code=404, detail=f"Unknown accident: {accident_id}")
+    return JSONResponse(accident)
+
+
+@app.post("/accidents/{accident_id}/verify")
+def verify_accident(accident_id: str) -> JSONResponse:
+    result = repository.verify_accident(accident_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Unknown accident: {accident_id}")
+    return JSONResponse(result)
+
+
+@app.get("/challans")
+def list_challans() -> JSONResponse:
+    return JSONResponse(repository.list_challans())
+
+
+@app.get("/challans/{challan_id}")
+def get_challan(challan_id: str) -> JSONResponse:
+    challan = repository.get_challan(challan_id)
+    if challan is None:
+        raise HTTPException(status_code=404, detail=f"Unknown challan: {challan_id}")
+    return JSONResponse(challan)
 
 
 @app.get("/traffic/state")

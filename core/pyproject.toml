@@ -16,6 +16,7 @@ dependencies = [
   "lap>=0.5.12",
   "fastapi>=0.115.0",
   "uvicorn>=0.32.0",
+  "psycopg[binary]>=3.2.0",
 ]
 
 [project.scripts]

@@ -2,26 +2,48 @@
 
 import React, { useState, useEffect } from 'react';
 import { AccidentLog } from '@/types/accident';
-import { getAccidents, verifyAccident } from '@/app/actions/logs';
+import { getAccidents, verifyAccident } from '@/lib/api';
+
+function isStreamUrl(url: string): boolean {
+  return url.includes('/camera/') && url.endsWith('/stream');
+}
 
 const AccidentLogsSection: React.FC = () => {
   const [accidents, setAccidents] = useState<AccidentLog[]>([]);
   const [selected, setSelected] = useState<AccidentLog | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const data = await getAccidents();
-      setAccidents(data.map((a: any) => ({...a, dob: a.dob.toISOString(), timestamp: a.timestamp.toISOString() })) as unknown as AccidentLog[]);
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await getAccidents();
+        setAccidents(data);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load accidents');
+      } finally {
+        setIsLoading(false);
+      }
     }
     load();
   }, []);
 
   const handleVerify = async (id: string) => {
-    await verifyAccident(id);
-    setAccidents((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, verified: true } : v))
-    );
-    setSelected((prev) => (prev ? { ...prev, verified: true } : prev));
+    try {
+      setVerifyingId(id);
+      const result = await verifyAccident(id);
+      setAccidents((prev) =>
+        prev.map((v) => (v.id === id ? result.accident : v))
+      );
+      setSelected((prev) => (prev && prev.id === id ? result.accident : prev));
+    } catch (verifyError) {
+      setError(verifyError instanceof Error ? verifyError.message : 'Failed to verify accident');
+    } finally {
+      setVerifyingId(null);
+    }
   };
 
   return (
@@ -29,6 +51,8 @@ const AccidentLogsSection: React.FC = () => {
         {!selected && (
           <>
             <h1 className="text-2xl font-bold mb-6">Accident Logs</h1>
+            {isLoading && <div className="text-sm text-gray-500">Loading accidents…</div>}
+            {error && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
             <div className="w-full space-y-4">
               {accidents.map((v) => (
                 <div
@@ -124,10 +148,20 @@ const AccidentLogsSection: React.FC = () => {
                 <img src={selected.screenshot3Url} alt="Screenshot 3" className="rounded border object-cover h-24 w-full" />
               </div>
               <div className="mb-4">
-                <video controls className="w-full rounded border">
-                  <source src={selected.videoUrl} type="video/mp4" />
-                  Your browser does not support the video tag.
-                </video>
+                {isStreamUrl(selected.videoUrl) ? (
+                  <div className="overflow-hidden rounded border bg-black">
+                    <img
+                      src={selected.videoUrl}
+                      alt={`Live stream for ${selected.title}`}
+                      className="w-full"
+                    />
+                  </div>
+                ) : (
+                  <video controls className="w-full rounded border">
+                    <source src={selected.videoUrl} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
+                )}
               </div>
               <div className="mb-4 text-gray-700">{selected.description}</div>
               <div className="flex items-center space-x-4">
@@ -142,9 +176,10 @@ const AccidentLogsSection: React.FC = () => {
                 {!selected.verified && (
                   <button
                     className="px-4 py-2 bg-[#3B82F6] text-white rounded font-medium hover:bg-blue-700"
+                    disabled={verifyingId === selected.id}
                     onClick={() => handleVerify(selected.id)}
                   >
-                    Verify & Generate Report
+                    {verifyingId === selected.id ? 'Verifying…' : 'Verify & Generate Report'}
                   </button>
                 )}
                 {selected.verified && (

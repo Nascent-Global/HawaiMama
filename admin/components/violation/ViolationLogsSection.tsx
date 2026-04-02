@@ -2,27 +2,48 @@
 
 import React, { useState, useEffect } from 'react';
 import { ViolationLog } from '@/types/violation';
-import { getViolations, verifyViolation } from '@/app/actions/logs';
+import { getViolations, verifyViolation } from '@/lib/api';
+
+function isStreamUrl(url: string): boolean {
+  return url.includes('/camera/') && url.endsWith('/stream');
+}
 
 const ViolationLogsSection: React.FC = () => {
   const [violations, setViolations] = useState<ViolationLog[]>([]);
   const [selected, setSelected] = useState<ViolationLog | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const data = await getViolations();
-      // Server passes dates as Dates, we could keep it simple.
-      setViolations(data.map((v: any) => ({...v, dob: v.dob.toISOString(), timestamp: v.timestamp.toISOString() })) as unknown as ViolationLog[]);
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await getViolations();
+        setViolations(data);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load violations');
+      } finally {
+        setIsLoading(false);
+      }
     }
     load();
   }, []);
 
   const handleVerify = async (id: string) => {
-    await verifyViolation(id);
-    setViolations((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, verified: true } : v))
-    );
-    setSelected((prev) => (prev ? { ...prev, verified: true } : prev));
+    try {
+      setVerifyingId(id);
+      const result = await verifyViolation(id);
+      setViolations((prev) =>
+        prev.map((v) => (v.id === id ? result.violation : v))
+      );
+      setSelected((prev) => (prev && prev.id === id ? result.violation : prev));
+    } catch (verifyError) {
+      setError(verifyError instanceof Error ? verifyError.message : 'Failed to verify violation');
+    } finally {
+      setVerifyingId(null);
+    }
   };
 
   return (
@@ -30,6 +51,8 @@ const ViolationLogsSection: React.FC = () => {
         {!selected && (
           <>
             <h1 className="text-2xl font-bold mb-6">Violation Logs</h1>
+            {isLoading && <div className="text-sm text-gray-500">Loading violations…</div>}
+            {error && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
             <div className="w-full space-y-4">
               {violations.map((v) => (
                 <div
@@ -125,10 +148,20 @@ const ViolationLogsSection: React.FC = () => {
                 <img src={selected.screenshot3Url} alt="Screenshot 3" className="rounded border object-cover h-24 w-full" />
               </div>
               <div className="mb-4">
-                <video controls className="w-full rounded border">
-                  <source src={selected.videoUrl} type="video/mp4" />
-                  Your browser does not support the video tag.
-                </video>
+                {isStreamUrl(selected.videoUrl) ? (
+                  <div className="overflow-hidden rounded border bg-black">
+                    <img
+                      src={selected.videoUrl}
+                      alt={`Live stream for ${selected.title}`}
+                      className="w-full"
+                    />
+                  </div>
+                ) : (
+                  <video controls className="w-full rounded border">
+                    <source src={selected.videoUrl} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
+                )}
               </div>
               <div className="mb-4 text-gray-700">{selected.description}</div>
               <div className="flex items-center space-x-4">
@@ -143,9 +176,10 @@ const ViolationLogsSection: React.FC = () => {
                 {!selected.verified && (
                   <button
                     className="px-4 py-2 bg-[#3B82F6] text-white rounded font-medium hover:bg-blue-700"
+                    disabled={verifyingId === selected.id}
                     onClick={() => handleVerify(selected.id)}
                   >
-                    Verify & Generate Challan
+                    {verifyingId === selected.id ? 'Verifying…' : 'Verify & Generate Challan'}
                   </button>
                 )}
                 {selected.verified && (

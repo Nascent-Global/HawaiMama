@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState } from "react";
-import { mockSurveillanceFeeds } from "@/lib/mock-surveillance-feeds";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { getSurveillanceFeeds } from "@/lib/api";
 import type { SurveillanceFeed } from "@/types/surveillance";
 import ViolationLogsSection from "@/components/violation/ViolationLogsSection";
 import AccidentLogsSection from "@/components/accident/AccidentLogsSection";
@@ -55,16 +55,10 @@ function FeedCard({
       >
         <div className="feed-video-wrap">
           <span className="feed-live-dot" title="Live" />
-          <video
+          <img
             className="feed-video"
             src={feed.stream_video}
-            poster={feed.poster}
-            autoPlay
-            loop
-            muted
-            playsInline
-            preload="metadata"
-            aria-label={`Surveillance at ${feed.address}`}
+            alt={`Live surveillance at ${feed.address}`}
           />
         </div>
         <footer className="feed-footer">
@@ -109,16 +103,10 @@ function FeedDetail({
           &lt; back
         </button>
         <span className="feed-live-dot feed-live-dot--large" title="Live" />
-        <video
+        <img
           className="feed-detail-video"
           src={feed.stream_video}
-          poster={feed.poster}
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="metadata"
-          aria-label={`Surveillance at ${feed.address}`}
+          alt={`Live surveillance at ${feed.address}`}
         />
       </div>
       <footer className="feed-detail-footer">
@@ -137,6 +125,16 @@ function FeedDetail({
             {feed.location}
           </span>
         )}
+        {feed.videoUrl ? (
+          <a
+            className="feed-detail-location"
+            href={feed.videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open source clip
+          </a>
+        ) : null}
         <span className="feed-expand-icon feed-expand-icon--detail" aria-hidden>
           &lt; &gt;
         </span>
@@ -148,8 +146,40 @@ function FeedDetail({
 export default function LiveSurveillanceDashboard() {
   const [nav, setNav] = useState<NavKey>("live");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [feeds, setFeeds] = useState<SurveillanceFeed[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isLoadingFeeds, setIsLoadingFeeds] = useState(true);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
-  const feeds = useMemo(() => mockSurveillanceFeeds, []);
+  useEffect(() => {
+    async function loadFeeds() {
+      try {
+        setIsLoadingFeeds(true);
+        setFeedError(null);
+        const data = await getSurveillanceFeeds();
+        setFeeds(data);
+      } catch (error) {
+        setFeedError(error instanceof Error ? error.message : "Failed to load live feeds");
+      } finally {
+        setIsLoadingFeeds(false);
+      }
+    }
+
+    loadFeeds();
+  }, []);
+
+  const filteredFeeds = useMemo(() => {
+    const query = deferredSearchQuery.trim().toLowerCase();
+    if (!query) {
+      return feeds;
+    }
+    return feeds.filter((feed) =>
+      [feed.address, feed.location, feed.id].some((value) =>
+        value.toLowerCase().includes(query)
+      )
+    );
+  }, [deferredSearchQuery, feeds]);
   const selected = useMemo(
     () => feeds.find((f) => f.id === selectedId) ?? null,
     [feeds, selectedId]
@@ -183,6 +213,8 @@ export default function LiveSurveillanceDashboard() {
               className="dash-search"
               placeholder="Search cameras, wards, plate numbers…"
               aria-label="Search dashboard"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
             />
             <SearchIcon />
           </div>
@@ -232,8 +264,20 @@ export default function LiveSurveillanceDashboard() {
 
           {nav === "live" && !selected && (
             <div className="feed-grid-scroll">
+              {isLoadingFeeds && (
+                <div className="dash-placeholder card-glass">
+                  <h2 className="dash-placeholder-title">Loading live feeds</h2>
+                  <p>Connecting to the Python stream server.</p>
+                </div>
+              )}
+              {feedError && (
+                <div className="dash-placeholder card-glass">
+                  <h2 className="dash-placeholder-title">Live feed unavailable</h2>
+                  <p>{feedError}</p>
+                </div>
+              )}
               <div className="feed-grid">
-                {feeds.map((feed) => (
+                {filteredFeeds.map((feed) => (
                   <FeedCard
                     key={feed.id}
                     feed={feed}
@@ -241,6 +285,12 @@ export default function LiveSurveillanceDashboard() {
                   />
                 ))}
               </div>
+              {!isLoadingFeeds && !feedError && filteredFeeds.length === 0 && (
+                <div className="dash-placeholder card-glass">
+                  <h2 className="dash-placeholder-title">No cameras matched</h2>
+                  <p>Try a different search term.</p>
+                </div>
+              )}
             </div>
           )}
 

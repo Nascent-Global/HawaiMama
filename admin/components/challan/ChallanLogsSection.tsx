@@ -2,16 +2,26 @@
 
 import React, { useState, useEffect } from 'react';
 import { ChallanLog } from '@/types/challan';
-import { getChallans } from '@/app/actions/logs';
+import { getChallans } from '@/lib/api';
 
 const ChallanLogsSection: React.FC = () => {
   const [challans, setChallans] = useState<ChallanLog[]>([]);
   const [selected, setSelected] = useState<ChallanLog | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const data = await getChallans();
-      setChallans(data as unknown as ChallanLog[]);
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await getChallans();
+        setChallans(data as unknown as ChallanLog[]);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load challans');
+      } finally {
+        setIsLoading(false);
+      }
     }
     load();
   }, []);
@@ -21,6 +31,8 @@ const ChallanLogsSection: React.FC = () => {
       {!selected && (
         <>
           <h1 className="text-2xl font-bold mb-6">Challan Logs</h1>
+          {isLoading && <div className="text-sm text-gray-500">Loading challans…</div>}
+          {error && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div className="w-full space-y-4">
             {challans.map((c) => (
               <div
@@ -159,7 +171,9 @@ const ChallanLogsSection: React.FC = () => {
                       Points Deducted: <span className="font-bold text-red-600">{selected.offense.pointsDeducted}</span>
                     </div>
                     <div>Offense Title: <span className="font-bold underline">{selected.offense.title}</span></div>
-                    <div className="mt-2 text-gray-800 bg-gray-100 p-2 italic border-l-4 border-gray-400">"{selected.offense.description}"</div>
+                    <div className="mt-2 text-gray-800 bg-gray-100 p-2 italic border-l-4 border-gray-400">
+                      &quot;{selected.offense.description}&quot;
+                    </div>
                     <div className="mt-3">Location: <strong>{selected.location.place}, {selected.location.district}</strong></div>
                 </div>
 

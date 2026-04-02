@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import React, { useState, useEffect } from 'react';
 import { ViolationLog } from '@/types/violation';
 import { getViolations, verifyViolation } from '@/lib/api';
@@ -66,7 +68,6 @@ const ViolationLogsSection: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline space-x-3">
                         <h3 className="text-lg font-semibold text-gray-900 truncate">{v.driverName}</h3>
-                        <span className="text-sm text-gray-500">Age: {v.age}</span>
                       </div>
                       <div className="mt-1 mb-2">
                         <span className="inline-block px-3 py-1 bg-red-300 text-white font-mono text-xs font-bold tracking-widest rounded-md border-b-2 border-r-2 border-red-500 shadow-sm">
@@ -136,10 +137,7 @@ const ViolationLogsSection: React.FC = () => {
                 </div>
                 <div>
                   <div className="font-semibold">{selected.driverName}</div>
-                  <div className="text-xs text-gray-500">DOB: {new Date(selected.dob).toLocaleDateString()}</div>
-                  <div className="text-xs text-gray-500">Blood Group: {selected.bloodGroup}</div>
-                  <div className="text-xs text-gray-500">Temp: {selected.tempAddress}</div>
-                  <div className="text-xs text-gray-500">Perm: {selected.permAddress}</div>
+                  <div className="text-xs text-gray-500">{selected.licensePlate}</div>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 mb-4">

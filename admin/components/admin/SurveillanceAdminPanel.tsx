@@ -6,7 +6,6 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   useDeferredValue,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -91,35 +90,23 @@ function RefreshIcon() {
   );
 }
 
-export default function SurveillanceAdminPanel() {
-  const [cameras, setCameras] = useState<SurveillanceCameraConfig[]>([]);
-  const [drafts, setDrafts] = useState<Drafts>({});
+export default function SurveillanceAdminPanel({
+  initialCameras = [],
+  initialError = null,
+}: {
+  initialCameras?: SurveillanceCameraConfig[];
+  initialError?: string | null;
+}) {
+  const [cameras, setCameras] = useState<SurveillanceCameraConfig[]>(initialCameras);
+  const [drafts, setDrafts] = useState<Drafts>(createDrafts(initialCameras));
   const [searchQuery, setSearchQuery] = useState("");
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
-
-  const loadInitialCameras = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const data = await getCameraConfigs();
-      setCameras(data);
-      setDrafts(createDrafts(data));
-    } catch (loadError) {
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Failed to load surveillance configuration",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const refreshCameras = async () => {
     try {
@@ -138,10 +125,6 @@ export default function SurveillanceAdminPanel() {
       setIsRefreshing(false);
     }
   };
-
-  useEffect(() => {
-    void loadInitialCameras();
-  }, []);
 
   const visibleCameras = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
@@ -257,7 +240,7 @@ export default function SurveillanceAdminPanel() {
   };
 
   return (
-    <div className="dash-root admin-root">
+    <div className="dash-root admin-root" suppressHydrationWarning>
       <div className="dash-top-bar admin-top-bar">
         <header className="logo-strip" role="banner">
           <div className="logo-strip-inner">

@@ -1,9 +1,10 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import Image from "next/image";
 import Link from "next/link";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { getSurveillanceFeeds } from "@/lib/api";
+import { useDeferredValue, useMemo, useState } from "react";
 import type { SurveillanceFeed } from "@/types/surveillance";
 import ViolationLogsSection from "@/components/violation/ViolationLogsSection";
 import AccidentLogsSection from "@/components/accident/AccidentLogsSection";
@@ -38,12 +39,119 @@ function SearchIcon() {
   );
 }
 
+function SystemToggle({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <label className="dash-system-toggle">
+      <div className="dash-system-toggle-copy">
+        <span className="dash-system-toggle-label">System Output</span>
+        <span className="dash-system-toggle-hint">
+          {enabled
+            ? "Uses each feed's admin mode"
+            : "Raw surveillance video"}
+        </span>
+      </div>
+      <span
+        className={`dash-system-toggle-track${
+          enabled ? " dash-system-toggle-track--enabled" : ""
+        }`}
+      >
+        <input
+          type="checkbox"
+          className="sr-only"
+          checked={enabled}
+          onChange={(event) => onChange(event.target.checked)}
+          aria-label="Toggle processed surveillance system"
+        />
+        <span
+          className={`dash-system-toggle-thumb${
+            enabled ? " dash-system-toggle-thumb--enabled" : ""
+          }`}
+        />
+      </span>
+    </label>
+  );
+}
+
+function FeedMedia({
+  feed,
+  systemEnabled,
+  detail = false,
+}: {
+  feed: SurveillanceFeed;
+  systemEnabled: boolean;
+  detail?: boolean;
+}) {
+  const className = detail ? "feed-detail-video" : "feed-video";
+  const mediaKey = `${feed.id}-${systemEnabled ? "system" : "raw"}-${detail ? "detail" : "grid"}`;
+
+  if (systemEnabled && detail) {
+    return (
+      <img
+        key={mediaKey}
+        className={className}
+        src={feed.stream_video}
+        alt={`System output at ${feed.address}`}
+      />
+    );
+  }
+
+  if (systemEnabled && feed.processedVideoUrl) {
+    return (
+      <video
+        key={mediaKey}
+        className={className}
+        src={feed.processedVideoUrl}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        controls={detail}
+      />
+    );
+  }
+
+  if (systemEnabled && !detail) {
+    return (
+      <div className={`${className} feed-video--empty`}>
+        Processed preview unavailable
+      </div>
+    );
+  }
+
+  if (feed.videoUrl) {
+    return (
+      <video
+        key={mediaKey}
+        className={className}
+        src={feed.videoUrl}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        controls={detail}
+      />
+    );
+  }
+
+  return <div className={`${className} feed-video--empty`}>Video unavailable</div>;
+}
+
 function FeedCard({
   feed,
   onOpen,
+  systemEnabled,
 }: {
   feed: SurveillanceFeed;
   onOpen: () => void;
+  systemEnabled: boolean;
 }) {
   return (
     <article className="feed-card">
@@ -56,11 +164,7 @@ function FeedCard({
       >
         <div className="feed-video-wrap">
           <span className="feed-live-dot" title="Live" />
-          <img
-            className="feed-video"
-            src={feed.stream_video}
-            alt={`Live surveillance at ${feed.address}`}
-          />
+          <FeedMedia feed={feed} systemEnabled={systemEnabled} />
         </div>
         <footer className="feed-footer">
           <div className="feed-meta">
@@ -93,9 +197,11 @@ function FeedCard({
 function FeedDetail({
   feed,
   onBack,
+  systemEnabled,
 }: {
   feed: SurveillanceFeed;
   onBack: () => void;
+  systemEnabled: boolean;
 }) {
   return (
     <div className="feed-detail">
@@ -104,11 +210,7 @@ function FeedDetail({
           &lt; back
         </button>
         <span className="feed-live-dot feed-live-dot--large" title="Live" />
-        <img
-          className="feed-detail-video"
-          src={feed.stream_video}
-          alt={`Live surveillance at ${feed.address}`}
-        />
+        <FeedMedia feed={feed} systemEnabled={systemEnabled} detail />
       </div>
       <footer className="feed-detail-footer">
         <p className="feed-detail-address">{feed.address}</p>
@@ -144,31 +246,21 @@ function FeedDetail({
   );
 }
 
-export default function LiveSurveillanceDashboard() {
+export default function LiveSurveillanceDashboard({
+  initialFeeds = [],
+  initialFeedError = null,
+}: {
+  initialFeeds?: SurveillanceFeed[];
+  initialFeedError?: string | null;
+}) {
   const [nav, setNav] = useState<NavKey>("live");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [feeds, setFeeds] = useState<SurveillanceFeed[]>([]);
+  const [feeds] = useState<SurveillanceFeed[]>(initialFeeds);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isLoadingFeeds, setIsLoadingFeeds] = useState(true);
-  const [feedError, setFeedError] = useState<string | null>(null);
+  const [systemEnabled, setSystemEnabled] = useState(false);
+  const [isLoadingFeeds] = useState(false);
+  const [feedError] = useState<string | null>(initialFeedError);
   const deferredSearchQuery = useDeferredValue(searchQuery);
-
-  useEffect(() => {
-    async function loadFeeds() {
-      try {
-        setIsLoadingFeeds(true);
-        setFeedError(null);
-        const data = await getSurveillanceFeeds();
-        setFeeds(data);
-      } catch (error) {
-        setFeedError(error instanceof Error ? error.message : "Failed to load live feeds");
-      } finally {
-        setIsLoadingFeeds(false);
-      }
-    }
-
-    loadFeeds();
-  }, []);
 
   const filteredFeeds = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
@@ -187,7 +279,7 @@ export default function LiveSurveillanceDashboard() {
   );
 
   return (
-    <div className="dash-root">
+    <div className="dash-root" suppressHydrationWarning>
       <div className="dash-top-bar">
         <header className="logo-strip" role="banner">
           <div className="logo-strip-inner">
@@ -219,6 +311,10 @@ export default function LiveSurveillanceDashboard() {
             />
             <SearchIcon />
           </div>
+          <SystemToggle
+            enabled={systemEnabled}
+            onChange={setSystemEnabled}
+          />
           <Link
             href="/admin"
             className="dash-utility-link"
@@ -288,6 +384,7 @@ export default function LiveSurveillanceDashboard() {
                   <FeedCard
                     key={feed.id}
                     feed={feed}
+                    systemEnabled={systemEnabled}
                     onOpen={() => setSelectedId(feed.id)}
                   />
                 ))}
@@ -302,7 +399,11 @@ export default function LiveSurveillanceDashboard() {
           )}
 
           {nav === "live" && selected && (
-            <FeedDetail feed={selected} onBack={() => setSelectedId(null)} />
+            <FeedDetail
+              feed={selected}
+              systemEnabled={systemEnabled}
+              onBack={() => setSelectedId(null)}
+            />
           )}
         </div>
       </div>

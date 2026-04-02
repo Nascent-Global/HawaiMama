@@ -1,12 +1,14 @@
-/** Live surveillance feed card (CCTV → dashboard). */
-export type SurveillanceFeed = {
-  id: string;
-  stream_video: string;
-  /** Optional poster while video loads (from `public/`, e.g. `/images/…`). */
-  poster?: string;
-  /** Optional downloadable/reference video for the same camera. */
-  videoUrl?: string;
-  address: string;
-  /** Map link or deep link string, e.g. maps://… or https://maps.google.com/… */
-  location: string;
-};
+import { z } from "zod";
+
+/** Live surveillance feed card (CCTV -> dashboard). */
+export const SurveillanceFeedSchema = z.object({
+  id: z.string(),
+  stream_video: z.string(),
+  poster: z.string().nullable().optional(),
+  videoUrl: z.string().optional(),
+  processedVideoUrl: z.string().nullable().optional(),
+  address: z.string(),
+  location: z.string(),
+});
+
+export type SurveillanceFeed = z.infer<typeof SurveillanceFeedSchema>;

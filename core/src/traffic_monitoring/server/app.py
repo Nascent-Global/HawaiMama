@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -18,7 +17,7 @@ from pydantic import BaseModel
 from traffic_monitoring.config import TrafficMonitoringConfig, apply_input_overrides, build_default_config
 from traffic_monitoring.events import ViolationCode
 from traffic_monitoring.pipeline import TrafficMonitoringPipeline
-from traffic_monitoring.server.repository import AdminRepository, SeedPayloads, default_database_url
+from traffic_monitoring.server.repository import AdminRepository, default_database_url
 from traffic_monitoring.traffic import SignalStateMachine
 
 
@@ -48,23 +47,6 @@ def _build_camera_registry(root: Path) -> dict[str, dict[str, object]]:
         }
     return cameras
 
-
-def _load_seed_payloads(root: Path) -> SeedPayloads:
-    admin_db_dir = root.parent / "admin" / "db"
-
-    def _load_json(name: str) -> list[dict[str, object]]:
-        path = admin_db_dir / name
-        if not path.exists():
-            return []
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    return SeedPayloads(
-        violations=_load_json("mock-violations.json"),
-        accidents=_load_json("mock-accidents.json"),
-        challans=_load_json("mock-challans.json"),
-    )
-
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -89,13 +71,24 @@ app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_di
 app.mount("/inputs", StaticFiles(directory=str(_base_config.root / "input")), name="inputs")
 app.mount(
     "/surveillance-media",
-    StaticFiles(directory=str(_base_config.root / "surveillance")),
+    StaticFiles(
+        directory=str(_base_config.root / "surveillance"),
+        follow_symlink=True,
+    ),
     name="surveillance-media",
+)
+app.mount(
+    "/surveillance-output",
+    StaticFiles(
+        directory=str(_base_config.root / "surveillance" / "output"),
+        follow_symlink=True,
+    ),
+    name="surveillance-output",
 )
 
 cameras: dict[str, dict[str, object]] = _build_camera_registry(_base_config.root)
 repository = AdminRepository(default_database_url(), project_root=_base_config.root)
-repository.initialize(cameras, _load_seed_payloads(_base_config.root))
+repository.initialize(cameras)
 
 events: list[dict[str, object]] = []
 traffic_state_by_camera: dict[str, dict[str, object]] = {}

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -49,21 +48,6 @@ def _coerce_timestamp(value: str | datetime) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
-def _normalize_demo_media(path: str | None, *, fallback: str) -> str:
-    if not path:
-        return fallback
-    if path.startswith("/images/violation") or path.startswith("/videos/violation"):
-        return fallback
-    return path
-
-
-@dataclass(frozen=True, slots=True)
-class SeedPayloads:
-    violations: list[dict[str, object]]
-    accidents: list[dict[str, object]]
-    challans: list[dict[str, object]]
-
-
 class AdminRepository:
     def __init__(self, database_url: str, *, project_root: Path) -> None:
         self.database_url = database_url
@@ -72,12 +56,10 @@ class AdminRepository:
     def initialize(
         self,
         cameras: dict[str, dict[str, object]],
-        seed_payloads: SeedPayloads,
     ) -> None:
         with self._connect() as connection:
             self._create_tables(connection)
             self._sync_cameras(connection, cameras)
-            self._seed_demo_data(connection, seed_payloads)
             connection.commit()
 
     def sync_cameras(self, cameras: dict[str, dict[str, object]]) -> None:
@@ -114,6 +96,7 @@ class AdminRepository:
                     "source": source,
                     "stream_url": f"/camera/{row['camera_id']}/stream",
                     "video_url": self._source_video_url(source),
+                    "processed_video_url": self._processed_video_url(str(row["camera_id"])),
                     "address": location,
                     "location_link": f"https://maps.google.com/?q={location.replace(' ', '+')}",
                 }
@@ -129,6 +112,7 @@ class AdminRepository:
                 "address": camera["address"],
                 "location": camera["location_link"],
                 "videoUrl": camera["video_url"],
+                "processedVideoUrl": camera.get("processed_video_url"),
             }
             for camera in self.list_cameras()
         ]
@@ -218,6 +202,7 @@ class AdminRepository:
                 "source": row["source"],
                 "stream_url": f"/camera/{row['camera_id']}/stream",
                 "video_url": self._source_video_url(str(row["source"])),
+                "processed_video_url": self._processed_video_url(str(row["camera_id"])),
                 "address": next_location,
                 "location_link": metadata.get("location_link")
                 or f"https://maps.google.com/?q={next_location.replace(' ', '+')}",
@@ -496,154 +481,6 @@ class AdminRepository:
                 ),
             )
 
-    def _seed_demo_data(
-        self,
-        connection: Connection[Any],
-        seed_payloads: SeedPayloads,
-    ) -> None:
-        if self._table_count(connection, "violations") == 0:
-            for payload in seed_payloads.violations:
-                seeded = self._normalize_seed_violation(payload)
-                connection.execute(
-                    """
-                    INSERT INTO violations (
-                        id,
-                        event_time,
-                        verified,
-                        source_event_key,
-                        challan_id,
-                        created_at,
-                        updated_at,
-                        payload_json
-                    )
-                    VALUES (%s, %s, %s, NULL, NULL, %s, %s, %s)
-                    """,
-                    (
-                        seeded["id"],
-                        _coerce_timestamp(seeded["timestamp"]),
-                        bool(seeded.get("verified", False)),
-                        _coerce_timestamp(seeded["createdAt"]),
-                        _coerce_timestamp(seeded["updatedAt"]),
-                        Jsonb(seeded),
-                    ),
-                )
-
-        if self._table_count(connection, "accidents") == 0:
-            for payload in seed_payloads.accidents:
-                seeded = self._normalize_seed_accident(payload)
-                connection.execute(
-                    """
-                    INSERT INTO accidents (
-                        id,
-                        event_time,
-                        verified,
-                        created_at,
-                        updated_at,
-                        payload_json
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        seeded["id"],
-                        _coerce_timestamp(seeded["timestamp"]),
-                        bool(seeded.get("verified", False)),
-                        _coerce_timestamp(seeded["createdAt"]),
-                        _coerce_timestamp(seeded["updatedAt"]),
-                        Jsonb(seeded),
-                    ),
-                )
-
-        if self._table_count(connection, "challans") == 0:
-            for payload in seed_payloads.challans:
-                seeded = self._normalize_seed_challan(payload)
-                connection.execute(
-                    """
-                    INSERT INTO challans (id, violation_id, created_at, payload_json)
-                    VALUES (%s, NULL, %s, %s)
-                    """,
-                    (
-                        seeded["id"],
-                        _coerce_timestamp(seeded["metadata"]["createdAt"]),
-                        Jsonb(seeded),
-                    ),
-                )
-
-    def _normalize_seed_violation(self, payload: dict[str, Any]) -> dict[str, Any]:
-        seeded = dict(payload)
-        now = _utc_now_iso()
-        seeded["cameraId"] = seeded.get("cameraId", "cam1")
-        seeded["trackId"] = seeded.get("trackId", 0)
-        seeded["vehicleType"] = seeded.get("vehicleType", "motorcycle")
-        seeded["violationCode"] = seeded.get("violationCode", "no_helmet")
-        seeded["screenshot1Url"] = _normalize_demo_media(
-            str(seeded.get("screenshot1Url") or ""),
-            fallback="/images/license-checking.jpg",
-        )
-        seeded["screenshot2Url"] = _normalize_demo_media(
-            str(seeded.get("screenshot2Url") or ""),
-            fallback="/images/alcohol-test.jpg",
-        )
-        seeded["screenshot3Url"] = _normalize_demo_media(
-            str(seeded.get("screenshot3Url") or ""),
-            fallback="/images/sirjana-chowk.jpg",
-        )
-        seeded["videoUrl"] = _normalize_demo_media(
-            str(seeded.get("videoUrl") or ""),
-            fallback="/videos/tudikhel-road-video.mp4",
-        )
-        seeded["createdAt"] = seeded.get("createdAt", seeded.get("timestamp", now))
-        seeded["updatedAt"] = seeded.get("updatedAt", seeded["createdAt"])
-        return seeded
-
-    def _normalize_seed_accident(self, payload: dict[str, Any]) -> dict[str, Any]:
-        seeded = dict(payload)
-        now = _utc_now_iso()
-        seeded["cameraId"] = seeded.get("cameraId", "cam2")
-        seeded["trackId"] = seeded.get("trackId", 0)
-        seeded["incidentType"] = seeded.get("incidentType", "collision")
-        seeded["screenshot1Url"] = _normalize_demo_media(
-            str(seeded.get("screenshot1Url") or ""),
-            fallback="/images/pokhara-fewa-lake.jpg",
-        )
-        seeded["screenshot2Url"] = _normalize_demo_media(
-            str(seeded.get("screenshot2Url") or ""),
-            fallback="/images/dummy-police-holding-board.jpg",
-        )
-        seeded["screenshot3Url"] = _normalize_demo_media(
-            str(seeded.get("screenshot3Url") or ""),
-            fallback="/images/sirjana-chowk.jpg",
-        )
-        seeded["videoUrl"] = _normalize_demo_media(
-            str(seeded.get("videoUrl") or ""),
-            fallback="/videos/road-ahead-drone-motion.mp4",
-        )
-        seeded["createdAt"] = seeded.get("createdAt", seeded.get("timestamp", now))
-        seeded["updatedAt"] = seeded.get("updatedAt", seeded["createdAt"])
-        return seeded
-
-    def _normalize_seed_challan(self, payload: dict[str, Any]) -> dict[str, Any]:
-        seeded = dict(payload)
-        evidence = dict(seeded.get("evidence", {}))
-        images = [
-            _normalize_demo_media(str(item), fallback="/images/license-checking.jpg")
-            for item in evidence.get("images", [])
-        ]
-        evidence["images"] = images or ["/images/license-checking.jpg"]
-        evidence["video"] = _normalize_demo_media(
-            str(evidence.get("video") or ""),
-            fallback="/videos/tudikhel-road-video.mp4",
-        )
-        seeded["evidence"] = evidence
-        metadata = dict(seeded.get("metadata", {}))
-        metadata["createdAt"] = metadata.get("createdAt", _utc_now_iso())
-        metadata["updatedAt"] = metadata.get("updatedAt", metadata["createdAt"])
-        seeded["metadata"] = metadata
-        return seeded
-
-    def _table_count(self, connection: Connection[Any], table_name: str) -> int:
-        row = connection.execute(f"SELECT COUNT(*) AS count FROM {table_name}").fetchone()
-        return int(row["count"]) if row else 0
-
     def _list_payload_table(self, table_name: str, *, order_by: str) -> list[dict[str, Any]]:
         query = f"SELECT payload_json FROM {table_name} ORDER BY {order_by}"
         with self._connect() as connection:
@@ -662,10 +499,44 @@ class AdminRepository:
         created_at = _utc_now_iso()
         challan_id = str(uuid4())
         ticket_number = f"HM-{challan_id[:8].upper()}"
-        offense_title = str(violation.get("title", "Traffic Violation"))
+        violation_code = str(violation.get("violationCode", "traffic_code"))
+        offense_policy = {
+            "no_helmet": {
+                "title": "Not wearing a helmet or seatbelt",
+                "fine_amount": 1000,
+                "points_deducted": 1,
+                "notes": "Mapped to Nepal Traffic Police safety equipment fine schedule.",
+            },
+            "wrong_lane": {
+                "title": "Lane Discipline Violation",
+                "fine_amount": 1500,
+                "points_deducted": 2,
+                "notes": "Mapped to Nepal Traffic Police lane discipline fine schedule.",
+            },
+            "overspeed": {
+                "title": "Overspeeding",
+                "fine_amount": 1500,
+                "points_deducted": 3,
+                "notes": (
+                    "Mapped to the base Nepal Traffic Police overspeed fine because "
+                    "severity bands are not yet configured in the backend."
+                ),
+            },
+        }.get(
+            violation_code,
+            {
+                "title": str(violation.get("title", "Traffic Violation")),
+                "fine_amount": 0,
+                "points_deducted": 0,
+                "notes": (
+                    "No Nepal Traffic Police fine rule is mapped yet for this violation code "
+                    "in the current backend policy table."
+                ),
+            },
+        )
+        offense_title = str(offense_policy["title"])
         issue_date_ad = str(violation.get("timestamp", created_at))[:10]
         issue_date_bs = issue_date_ad
-        fine_amount = 1500 if violation.get("violationCode") == "no_helmet" else 2500
         return {
             "id": challan_id,
             "ticket": {
@@ -699,10 +570,10 @@ class AdminRepository:
             },
             "offense": {
                 "title": offense_title,
-                "sectionCode": str(violation.get("violationCode", "traffic_code")),
+                "sectionCode": violation_code,
                 "description": str(violation.get("description", "")),
-                "fineAmount": fine_amount,
-                "pointsDeducted": 2,
+                "fineAmount": int(offense_policy["fine_amount"]),
+                "pointsDeducted": int(offense_policy["points_deducted"]),
             },
             "location": {
                 "place": str(violation.get("tempAddress", "Unknown Location")),
@@ -736,7 +607,7 @@ class AdminRepository:
                     if value
                 ],
                 "video": str(violation.get("videoUrl", "")),
-                "notes": "Generated from verified traffic violation event.",
+                "notes": str(offense_policy["notes"]),
             },
             "metadata": {
                 "createdAt": created_at,
@@ -751,3 +622,9 @@ class AdminRepository:
         if path.parent.name == "surveillance":
             return f"/surveillance-media/{path.name}"
         return f"/inputs/{path.name}"
+
+    def _processed_video_url(self, camera_id: str) -> str | None:
+        candidate = self.project_root / "surveillance" / "output" / f"{camera_id}.mp4"
+        if candidate.exists():
+            return f"/surveillance-output/{camera_id}.mp4"
+        return None

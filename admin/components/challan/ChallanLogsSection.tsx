@@ -118,6 +118,11 @@ const ChallanLogsSection: React.FC = () => {
               </div>
 
               {/* Top Record Info */}
+              {selected.metadata.isMockData && (
+                <div className="mb-4 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  Demo data — not real DoTM records
+                </div>
+              )}
               <div className="flex justify-between items-start mb-6 text-sm font-bold border border-black p-4 bg-gray-50/50">
                 <div className="space-y-1">
                   <div>TICKET NUMBER: <span className="text-red-700 text-lg tracking-wider">{selected.ticket.ticketNumber}</span></div>

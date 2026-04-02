@@ -17,6 +17,7 @@ from traffic_monitoring.config import (
 from traffic_monitoring.detectors import EasyOCRReader, InferenceDetection, YOLODetector
 from traffic_monitoring.domain import FrameContext
 from traffic_monitoring.events import ViolationRecorder, ViolationEngine
+from traffic_monitoring.mock_dotm_service import load_mock_dotm_service
 from traffic_monitoring.secondary import (
     FaceCaptureAnalyzer,
     HelmetComplianceAnalyzer,
@@ -99,11 +100,13 @@ class TrafficMonitoringPipeline:
         )
         self.track_manager = TrackManager(config)
         self.rider_association = RiderAssociationEngine(config)
+        self.vehicle_registry = load_mock_dotm_service(config.root)
         self.plate_recognizer = PlateRecognizer(
             config,
             self.plate_detector,
             self.ocr_reader,
             self.char_detector,
+            self.vehicle_registry,
         )
         self.helmet_analyzer = HelmetComplianceAnalyzer(config, self.helmet_detector)
         self.face_capture = FaceCaptureAnalyzer(config, self.face_detector)

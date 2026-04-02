@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tempfile
@@ -21,6 +22,7 @@ from pydantic import BaseModel
 
 from traffic_monitoring.config import TrafficMonitoringConfig, apply_input_overrides, build_default_config
 from traffic_monitoring.events import ViolationCode
+from traffic_monitoring.mock_dotm_service import load_mock_dotm_service
 from traffic_monitoring.pipeline import TrafficMonitoringPipeline
 from traffic_monitoring.server.repository import AdminRepository, default_database_url
 from traffic_monitoring.storage import build_object_storage, load_object_storage_settings
@@ -107,6 +109,7 @@ cameras: dict[str, dict[str, object]] = _build_camera_registry(_base_config.root
 repository = AdminRepository(default_database_url(), project_root=_base_config.root)
 repository.initialize(cameras)
 object_storage = build_object_storage(_base_config.root)
+vehicle_registry = load_mock_dotm_service(_base_config.root)
 
 events: list[dict[str, object]] = []
 traffic_state_by_camera: dict[str, dict[str, object]] = {}
@@ -328,15 +331,38 @@ def _save_snapshot(
     timestamp = datetime.fromtimestamp(context_time, tz=UTC)
     timestamp_tag = timestamp.strftime("%H%M%S_%f")
     location_slug = _slugify(_camera_location(camera_id))
+    owner_snapshot = _owner_snapshot(
+        camera_id=camera_id,
+        track=track,
+        seed=f"{camera_id}:{track.track_id}:{timestamp_tag}:{violation}",
+    )
     storage_key = (
         f"violations/{timestamp:%Y/%m/%d}/{camera_id}-{location_slug}/"
         f"{violation}/track-{track.track_id}/{timestamp_tag}_snapshot.jpg"
     )
-    return object_storage.put_bytes(
+    image_url = object_storage.put_bytes(
         storage_key,
         encoded.tobytes(),
         content_type="image/jpeg",
     )
+    metadata_key = storage_key.rsplit(".", maxsplit=1)[0] + ".json"
+    metadata_payload = {
+        "plate": track.plate_text,
+        "owner_name": owner_snapshot["owner_name"],
+        "owner_address": owner_snapshot["owner_address"],
+        "violation": violation,
+        "camera_id": camera_id,
+        "camera_location": _camera_location(camera_id),
+        "timestamp": _timestamp_to_iso(context_time),
+        "image_url": image_url,
+        "is_mock_data": owner_snapshot["is_mock_data"],
+    }
+    object_storage.put_bytes(
+        metadata_key,
+        json.dumps(metadata_payload, indent=2).encode("utf-8"),
+        content_type="application/json",
+    )
+    return image_url
 
 
 def _remember_frame(camera_id: str, pipeline: TrafficMonitoringPipeline) -> None:
@@ -434,6 +460,18 @@ def _camera_location_link(camera_id: str) -> str:
     )
 
 
+def _owner_snapshot(*, camera_id: str, track, seed: str) -> dict[str, object]:
+    fallback = vehicle_registry.choose_demo_record(seed=seed)
+    return {
+        "owner_name": str(track.metadata.get("owner_name") or fallback.owner_name),
+        "owner_address": str(track.metadata.get("owner_address") or fallback.address),
+        "vehicle_color": str(track.metadata.get("vehicle_color") or fallback.color),
+        "registration_date": str(track.metadata.get("registration_date") or fallback.registration_date),
+        "owner_contact_number": str(track.metadata.get("owner_contact_number") or fallback.contact_number),
+        "is_mock_data": bool(track.metadata.get("is_mock_data", True)),
+    }
+
+
 def _build_violation_record(
     *,
     camera_id: str,
@@ -459,20 +497,32 @@ def _build_violation_record(
     now = _utc_now_iso()
     timestamp = _timestamp_to_iso(timestamp_seconds)
     license_plate = (track.plate_text or f"{track.label_name[:2].upper()}-{track.track_id:04d}").upper()
+    owner_snapshot = _owner_snapshot(
+        camera_id=camera_id,
+        track=track,
+        seed=f"{camera_id}:{track.track_id}:{timestamp}",
+    )
+    owner_name = str(owner_snapshot["owner_name"])
+    owner_address = str(owner_snapshot["owner_address"])
+    vehicle_color = str(owner_snapshot["vehicle_color"])
+    registration_date = str(owner_snapshot["registration_date"])
+    owner_contact_number = str(owner_snapshot["owner_contact_number"])
+    is_mock_data = bool(owner_snapshot["is_mock_data"])
+    vehicle_type = str(track.metadata.get("owner_vehicle_type") or track.label_name)
     return {
         "id": str(uuid4()),
         "cameraId": camera_id,
         "trackId": track.track_id,
         "violationCode": violation_code,
-        "vehicleType": track.label_name,
+        "vehicleType": vehicle_type,
         "title": violation_titles.get(violation_code, "Traffic Violation"),
-        "driverName": f"Tracked {track.label_name.title()} {track.track_id}",
+        "driverName": owner_name,
         "age": 0,
         "dob": "2000-01-01T00:00:00Z",
         "bloodGroup": "Unknown",
         "licensePlate": license_plate,
-        "tempAddress": location,
-        "permAddress": location,
+        "tempAddress": owner_address,
+        "permAddress": owner_address,
         "timestamp": timestamp,
         "locationLink": _camera_location_link(camera_id),
         "screenshot1Url": image_path or "",
@@ -481,7 +531,8 @@ def _build_violation_record(
         "videoUrl": clip_url or source_video_url,
         "description": (
             f"{violation_titles.get(violation_code, 'Traffic violation')} detected at "
-            f"{location}. Plate read: {track.plate_text or 'pending verification'}."
+            f"{location}. Plate read: {track.plate_text or 'pending verification'}. "
+            f"Owner: {owner_name}."
         ),
         "verified": False,
         "cameraLocation": location,
@@ -489,6 +540,12 @@ def _build_violation_record(
         "evidenceProvider": object_storage.provider,
         "evidenceClipUrl": clip_url or "",
         "sourceVideoUrl": source_video_url,
+        "ownerName": owner_name,
+        "ownerAddress": owner_address,
+        "ownerContactNumber": owner_contact_number,
+        "vehicleColor": vehicle_color,
+        "registrationDate": registration_date,
+        "isMockData": is_mock_data,
         "createdAt": now,
         "updatedAt": now,
     }
@@ -526,18 +583,27 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
                 context_time=timestamp,
                 violation=violation,
             )
+            owner_snapshot = _owner_snapshot(
+                camera_id=camera_id,
+                track=track,
+                seed=f"{camera_id}:{track_id}:{timestamp}:{violation}",
+            )
             event_payload = {
                 "camera": camera_id,
                 "time": timestamp,
                 "track_id": track_id,
                 "vehicle": track.label_name,
+                "vehicle_type": str(track.metadata.get("owner_vehicle_type") or track.label_name),
                 "plate": track.plate_text,
+                "owner_name": owner_snapshot["owner_name"],
+                "address": owner_snapshot["owner_address"],
                 "violation": violation,
                 "image": image_path,
                 "video": clip_url,
                 "location": _camera_location(camera_id),
                 "location_link": _camera_location_link(camera_id),
                 "storage_provider": object_storage.provider,
+                "is_mock_data": owner_snapshot["is_mock_data"],
             }
             events.append(event_payload)
             repository.ingest_violation_event(
@@ -591,6 +657,11 @@ def camera_stream(camera_id: str) -> StreamingResponse:
 def surveillance_feeds() -> JSONResponse:
     _refresh_camera_inventory()
     return JSONResponse(repository.list_surveillance_feeds())
+
+
+@app.get("/vehicle/{plate}")
+def vehicle_lookup(plate: str) -> JSONResponse:
+    return JSONResponse(vehicle_registry.api_response(plate))
 
 
 @app.get("/events")

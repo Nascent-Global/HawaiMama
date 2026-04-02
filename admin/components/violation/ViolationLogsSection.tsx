@@ -82,8 +82,8 @@ const ViolationLogsSection: React.FC = () => {
                       {v.driverName[0]}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline space-x-3">
-                        <h3 className="text-lg font-semibold text-gray-900 truncate">{v.driverName}</h3>
+                    <div className="flex items-baseline space-x-3">
+                        <h3 className="text-lg font-semibold text-gray-900 truncate">{v.ownerName || v.driverName}</h3>
                       </div>
                       <div className="mt-1 mb-2">
                         <span className="inline-block px-3 py-1 bg-red-300 text-white font-mono text-xs font-bold tracking-widest rounded-md border-b-2 border-r-2 border-red-500 shadow-sm">
@@ -152,7 +152,7 @@ const ViolationLogsSection: React.FC = () => {
                   {selected.driverName[0]}
                 </div>
                 <div>
-                  <div className="font-semibold">{selected.driverName}</div>
+                  <div className="font-semibold">{selected.ownerName || selected.driverName}</div>
                   <div className="text-xs text-gray-500">{selected.licensePlate}</div>
                   <div className="mt-1 text-xs text-gray-500">
                     {[selected.cameraId?.toUpperCase(), selected.cameraLocation || selected.tempAddress]
@@ -161,6 +161,11 @@ const ViolationLogsSection: React.FC = () => {
                   </div>
                 </div>
               </div>
+              {selected.isMockData && (
+                <div className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Demo data — not real DoTM records
+                </div>
+              )}
               <div className="mb-4 grid gap-3 rounded border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 md:grid-cols-2">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Camera</div>
@@ -182,12 +187,24 @@ const ViolationLogsSection: React.FC = () => {
                   )}
                 </div>
                 <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Owner Address</div>
+                  <div>{selected.ownerAddress || selected.tempAddress}</div>
+                </div>
+                <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Evidence Source</div>
                   <div className="capitalize">{selected.evidenceProvider || 'local'}</div>
                 </div>
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Playback</div>
                   <div>{evidenceVideoLabel(selected) || 'Unavailable'}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Vehicle Color</div>
+                  <div>{selected.vehicleColor || 'Unknown'}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Registration Date</div>
+                  <div>{selected.registrationDate || 'Unknown'}</div>
                 </div>
               </div>
               {selectedScreenshots.length > 0 && (

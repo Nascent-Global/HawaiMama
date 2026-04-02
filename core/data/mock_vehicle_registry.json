@@ -1,0 +1,200 @@
+{
+  "CA2710": {
+    "plate_number": "CA2710",
+    "owner_name": "Ram Bahadur Thapa",
+    "address": "Pokhara-5, Kaski",
+    "vehicle_type": "Car",
+    "color": "Silver",
+    "registration_date": "2021-03-18",
+    "contact_number": "9801001001"
+  },
+  "CA2436": {
+    "plate_number": "CA2436",
+    "owner_name": "Sita Kumari Gurung",
+    "address": "Pokhara-8, Kaski",
+    "vehicle_type": "Car",
+    "color": "White",
+    "registration_date": "2020-11-09",
+    "contact_number": "9801001002"
+  },
+  "CA2208": {
+    "plate_number": "CA2208",
+    "owner_name": "Bikash Shrestha",
+    "address": "Lekhnath-11, Kaski",
+    "vehicle_type": "Car",
+    "color": "Blue",
+    "registration_date": "2022-01-14",
+    "contact_number": "9801001003"
+  },
+  "BA3321": {
+    "plate_number": "BA3321",
+    "owner_name": "Rita Kandel",
+    "address": "Amarsingh, Pokhara-10",
+    "vehicle_type": "Bike",
+    "color": "Red",
+    "registration_date": "2023-02-07",
+    "contact_number": "9801001004"
+  },
+  "BA8899": {
+    "plate_number": "BA8899",
+    "owner_name": "Nabin BK",
+    "address": "New Road, Pokhara-9",
+    "vehicle_type": "Bike",
+    "color": "Black",
+    "registration_date": "2022-07-22",
+    "contact_number": "9801001005"
+  },
+  "GA5682": {
+    "plate_number": "GA5682",
+    "owner_name": "Sunita Magar",
+    "address": "Mahendrapool, Pokhara-1",
+    "vehicle_type": "Scooter",
+    "color": "White",
+    "registration_date": "2021-09-30",
+    "contact_number": "9801001006"
+  },
+  "BACH1234": {
+    "plate_number": "BA-CH-1234",
+    "owner_name": "Sam Bahadur Rana",
+    "address": "Simpani, Pokhara-3",
+    "vehicle_type": "Car",
+    "color": "Gray",
+    "registration_date": "2019-05-25",
+    "contact_number": "9801001007"
+  },
+  "GA9901": {
+    "plate_number": "GA9901",
+    "owner_name": "Pooja Shrestha",
+    "address": "Lakeside, Pokhara-6",
+    "vehicle_type": "Scooter",
+    "color": "Pink",
+    "registration_date": "2023-08-12",
+    "contact_number": "9801001008"
+  },
+  "GA5543": {
+    "plate_number": "GA5543",
+    "owner_name": "Suman Gurung",
+    "address": "Devi's Fall, Pokhara-17",
+    "vehicle_type": "Bus",
+    "color": "White",
+    "registration_date": "2018-12-03",
+    "contact_number": "9801001009"
+  },
+  "GA1122": {
+    "plate_number": "GA1122",
+    "owner_name": "Gopal Adhikari",
+    "address": "Birauta, Pokhara-14",
+    "vehicle_type": "Bike",
+    "color": "Black",
+    "registration_date": "2020-04-18",
+    "contact_number": "9801001010"
+  },
+  "BA8493": {
+    "plate_number": "BA8493",
+    "owner_name": "Bikash Thapa",
+    "address": "Bijaypur, Pokhara-31",
+    "vehicle_type": "Car",
+    "color": "Maroon",
+    "registration_date": "2021-06-29",
+    "contact_number": "9801001011"
+  },
+  "BA2343": {
+    "plate_number": "BA2343",
+    "owner_name": "Prerna Lama",
+    "address": "Bijaypur, Pokhara-31",
+    "vehicle_type": "Bike",
+    "color": "Yellow",
+    "registration_date": "2024-01-05",
+    "contact_number": "9801001012"
+  },
+  "GA7711": {
+    "plate_number": "GA7711",
+    "owner_name": "Kiran Poudel",
+    "address": "Bagar, Pokhara-2",
+    "vehicle_type": "Car",
+    "color": "White",
+    "registration_date": "2022-10-10",
+    "contact_number": "9801001013"
+  },
+  "LU5566": {
+    "plate_number": "LU5566",
+    "owner_name": "Mina Ale",
+    "address": "Butwal-11, Rupandehi",
+    "vehicle_type": "Bus",
+    "color": "Green",
+    "registration_date": "2017-03-14",
+    "contact_number": "9801001014"
+  },
+  "KO4455": {
+    "plate_number": "KO4455",
+    "owner_name": "Hari Prasad Dahal",
+    "address": "Dharan-8, Sunsari",
+    "vehicle_type": "Truck",
+    "color": "Blue",
+    "registration_date": "2016-08-20",
+    "contact_number": "9801001015"
+  },
+  "NA6677": {
+    "plate_number": "NA6677",
+    "owner_name": "Pabitra Karki",
+    "address": "Narayanghat-4, Chitwan",
+    "vehicle_type": "Car",
+    "color": "Black",
+    "registration_date": "2020-02-27",
+    "contact_number": "9801001016"
+  },
+  "ME1201": {
+    "plate_number": "ME1201",
+    "owner_name": "Deepak Bista",
+    "address": "Dhangadhi-5, Kailali",
+    "vehicle_type": "Bike",
+    "color": "Blue",
+    "registration_date": "2019-09-11",
+    "contact_number": "9801001017"
+  },
+  "SA9080": {
+    "plate_number": "SA9080",
+    "owner_name": "Anita KC",
+    "address": "Janakpur-7, Dhanusha",
+    "vehicle_type": "Scooter",
+    "color": "Purple",
+    "registration_date": "2023-04-04",
+    "contact_number": "9801001018"
+  },
+  "BA7777": {
+    "plate_number": "BA7777",
+    "owner_name": "Ramesh Koirala",
+    "address": "Kalanki, Kathmandu-14",
+    "vehicle_type": "Car",
+    "color": "Silver",
+    "registration_date": "2018-06-06",
+    "contact_number": "9801001019"
+  },
+  "GA2405": {
+    "plate_number": "GA2405",
+    "owner_name": "Saraswati Pariyar",
+    "address": "Hemja, Pokhara-25",
+    "vehicle_type": "Bike",
+    "color": "Orange",
+    "registration_date": "2022-12-22",
+    "contact_number": "9801001020"
+  },
+  "CA1050": {
+    "plate_number": "CA1050",
+    "owner_name": "Prabin Bhujel",
+    "address": "Buddhachowk, Pokhara-10",
+    "vehicle_type": "Car",
+    "color": "Brown",
+    "registration_date": "2021-01-31",
+    "contact_number": "9801001021"
+  },
+  "BA5601": {
+    "plate_number": "BA5601",
+    "owner_name": "Maya Gurung",
+    "address": "Nayabazar, Pokhara-9",
+    "vehicle_type": "Scooter",
+    "color": "White",
+    "registration_date": "2024-02-16",
+    "contact_number": "9801001022"
+  }
+}

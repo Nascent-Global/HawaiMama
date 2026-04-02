@@ -135,6 +135,9 @@ def build_track_annotation(
         AnnotationLine("Plate", _format_plate(track)),
         AnnotationLine("Violations", _join_violation_codes(findings)),
     )
+    owner_name = str(track.metadata.get("owner_name", "")).strip()
+    if owner_name:
+        lines = (*lines, AnnotationLine("Owner", owner_name[:28]))
     if track.face_bbox is not None:
         lines = (*lines, AnnotationLine("Face", "Captured"))
     if track.helmet_state.value != "unknown":

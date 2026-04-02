@@ -68,6 +68,7 @@ export const ChallanSchema = z.object({
     createdAt: z.string(),
     updatedAt: z.string(),
     source: z.enum(['manual', 'ai-extracted']),
+    isMockData: z.boolean().optional(),
   }),
 });
 

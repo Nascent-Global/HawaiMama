@@ -31,6 +31,9 @@ class ViolationRecorder:
                     "vehicle_type": track.label_name,
                     "speed_kmh": round(track.smoothed_speed() or track.estimated_speed_kmh or 0.0, 2),
                     "plate_text": track.plate_text,
+                    "owner_name": track.metadata.get("owner_name"),
+                    "owner_address": track.metadata.get("owner_address"),
+                    "is_mock_data": bool(track.metadata.get("is_mock_data", False)),
                     "plate_state": track.plate_state.value,
                     "violations": [finding.code.value for finding in findings],
                 }

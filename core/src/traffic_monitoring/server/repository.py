@@ -551,17 +551,17 @@ class AdminRepository:
                 "office": "Traffic Police Department",
             },
             "owner": {
-                "fullName": str(violation.get("driverName", "Unknown Driver")),
+                "fullName": str(violation.get("ownerName") or violation.get("driverName", "Unknown Driver")),
                 "age": int(violation.get("age", 0) or 0),
-                "address": str(violation.get("tempAddress", "Unknown Address")),
-                "contactNumber": "9800000000",
+                "address": str(violation.get("ownerAddress") or violation.get("tempAddress", "Unknown Address")),
+                "contactNumber": str(violation.get("ownerContactNumber", "9800000000")),
             },
             "vehicle": {
                 "registrationNumber": str(violation.get("licensePlate", "UNKNOWN")),
                 "provinceCode": "Gandaki",
                 "vehicleType": str(violation.get("vehicleType", "vehicle")),
                 "model": "Pending verification",
-                "color": "Unknown",
+                "color": str(violation.get("vehicleColor", "Unknown")),
             },
             "license": {
                 "licenseNumber": "Pending verification",
@@ -613,6 +613,7 @@ class AdminRepository:
                 "createdAt": created_at,
                 "updatedAt": created_at,
                 "source": "ai-extracted",
+                "isMockData": bool(violation.get("isMockData", True)),
             },
             "violationId": violation.get("id"),
         }

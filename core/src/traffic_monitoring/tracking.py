@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 import cv2
 import numpy as np
 
+from .mock_dotm_service import MockDoTMService
 from .domain import (
     BoundingBox,
     Detection,
@@ -389,11 +390,13 @@ class PlateRecognizer:
         detector: "YOLODetector | None",
         ocr_reader: "EasyOCRReader | None",
         char_detector: "YOLODetector | None" = None,
+        vehicle_registry: MockDoTMService | None = None,
     ) -> None:
         self.config = config
         self.detector = detector
         self.ocr_reader = ocr_reader
         self.char_detector = char_detector
+        self.vehicle_registry = vehicle_registry
 
     def _debug(self, message: str) -> None:
         if self.config.runtime_options.ocr_debug:
@@ -446,6 +449,7 @@ class PlateRecognizer:
                 state=PlateState.READABLE,
                 bbox=translated_bbox,
             )
+            self._attach_owner_metadata(track, smoothed_text)
             track.metadata["plate_last_success_frame"] = track.last_seen_frame
             return
         track.mark_plate(
@@ -835,6 +839,28 @@ class PlateRecognizer:
         if not isinstance(last_processed, int):
             return False
         return (track.last_seen_frame - last_processed) < cooldown
+
+    def _attach_owner_metadata(self, track: TrackState, plate_text: str) -> None:
+        if self.vehicle_registry is None:
+            return
+        record = self.vehicle_registry.get_vehicle_details(plate_text)
+        track.metadata["is_mock_data"] = True
+        track.metadata["owner_lookup_plate"] = plate_text
+        if record is None:
+            track.metadata["owner_lookup_found"] = False
+            return
+        track.metadata.update(
+            {
+                "owner_lookup_found": True,
+                "owner_name": record.owner_name,
+                "owner_address": record.address,
+                "owner_vehicle_type": record.vehicle_type,
+                "vehicle_color": record.color,
+                "registration_date": record.registration_date,
+                "owner_contact_number": record.contact_number,
+                "is_mock_data": record.is_mock_data,
+            }
+        )
 
     def _crop(
         self,

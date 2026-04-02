@@ -24,6 +24,12 @@ export const ViolationLogSchema = z.object({
   evidenceProvider: z.string().optional(),
   evidenceClipUrl: z.string().optional(),
   sourceVideoUrl: z.string().optional(),
+  ownerName: z.string().optional(),
+  ownerAddress: z.string().optional(),
+  ownerContactNumber: z.string().optional(),
+  vehicleColor: z.string().optional(),
+  registrationDate: z.string().optional(),
+  isMockData: z.boolean().optional(),
 });
 
 export type ViolationLog = z.infer<typeof ViolationLogSchema>;

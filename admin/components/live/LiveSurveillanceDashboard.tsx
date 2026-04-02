@@ -46,6 +46,21 @@ function FeedMedia({
     return <img key={mediaKey} className="h-full w-full object-cover" src={feed.stream_video} alt={`System output at ${feed.address}`} />;
   }
 
+  if (!detail && systemEnabled && feed.processedVideoUrl) {
+    return (
+      <video
+        key={mediaKey}
+        className="h-full w-full object-cover"
+        src={feed.processedVideoUrl}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+      />
+    );
+  }
+
   if (!detail && feed.previewVideoUrl) {
     return (
       <video
@@ -78,6 +93,71 @@ function FeedMedia({
   }
 
   return <div className="flex h-full items-center justify-center bg-slate-900 text-sm text-white/70">Video unavailable</div>;
+}
+
+function FeedTile({
+  feed,
+  systemEnabled,
+}: {
+  feed: SurveillanceFeed;
+  systemEnabled: boolean;
+}) {
+  return (
+    <article className="overflow-hidden border border-[var(--gov-line)] bg-white shadow-[0_10px_28px_rgba(18,35,61,0.08)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_34px_rgba(18,35,61,0.12)]">
+      <div className="flex items-center justify-between border-b border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-3">
+        <div className="min-w-0">
+          <div className="truncate text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-red)]">
+            {systemEnabled ? "Processed system output" : "Raw surveillance feed"}
+          </div>
+          <div className="mt-1 truncate text-base font-bold uppercase tracking-[0.1em] text-[var(--gov-ink)]">{feed.id}</div>
+        </div>
+        <span className="inline-flex items-center gap-2 border border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--gov-red-dark)]">
+          <span className="h-2 w-2 rounded-full bg-[var(--gov-red)]" />
+          Live
+        </span>
+      </div>
+
+      <div className="aspect-video bg-black">
+        <FeedMedia feed={feed} systemEnabled={systemEnabled} />
+      </div>
+
+      <div className="grid gap-3 border-t border-[var(--gov-line)] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="min-w-0 space-y-2">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Location</div>
+            <div className="mt-1 truncate text-sm font-semibold text-[var(--gov-ink)]">{feed.location}</div>
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Address</div>
+            <div className="mt-1 truncate text-sm text-[var(--gov-muted)]">{feed.address}</div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+          {feed.videoUrl ? (
+            <a
+              href={feed.videoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-[var(--gov-line-strong)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-blue)] hover:border-[var(--gov-blue)]"
+            >
+              Source
+            </a>
+          ) : null}
+          {feed.locationLink ? (
+            <a
+              href={feed.locationLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-[var(--gov-line-strong)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-blue)] hover:border-[var(--gov-blue)]"
+            >
+              Map
+            </a>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function DashboardShell({
@@ -140,133 +220,9 @@ function SessionBlock({
   );
 }
 
-function FeedRegistry({
-  feeds,
-  selectedId,
-  onSelect,
-  systemEnabled,
-}: {
-  feeds: SurveillanceFeed[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  systemEnabled: boolean;
-}) {
-  return (
-    <div className="gov-scrollbar min-h-0 overflow-auto border border-[var(--gov-line)] bg-white">
-      <div className="hidden grid-cols-[180px_minmax(0,1fr)_140px_110px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)] md:grid">
-        <span>Camera</span>
-        <span>Location</span>
-        <span>Mode</span>
-        <span>Status</span>
-      </div>
-      <div className="divide-y divide-[var(--gov-line)]">
-        {feeds.map((feed) => {
-          const isSelected = selectedId === feed.id;
-          return (
-            <button
-              key={feed.id}
-              type="button"
-              className={`grid w-full gap-3 px-4 py-3 text-left transition hover:bg-[var(--gov-highlight)] md:grid-cols-[180px_minmax(0,1fr)_140px_110px] ${
-                isSelected ? "bg-[var(--gov-highlight)]" : "bg-white"
-              }`}
-              onClick={() => onSelect(feed.id)}
-            >
-              <div className="min-w-0">
-                <div className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--gov-blue)]">{feed.id}</div>
-                <div className="mt-1 truncate text-xs text-[var(--gov-muted)]">{feed.address}</div>
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-[var(--gov-ink)]">{feed.location}</div>
-                <div className="mt-1 truncate text-xs text-[var(--gov-muted)]">{feed.locationLink || "Map link not configured"}</div>
-              </div>
-              <div className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gov-muted)]">
-                {systemEnabled ? "Processed" : "Raw stream"}
-              </div>
-              <div>
-                <span className="inline-flex items-center gap-2 border border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--gov-red-dark)]">
-                  <span className="h-2 w-2 rounded-full bg-[var(--gov-red)]" />
-                  Live
-                </span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function FeedDetail({
-  feed,
-  systemEnabled,
-}: {
-  feed: SurveillanceFeed;
-  systemEnabled: boolean;
-}) {
-  return (
-    <section className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
-      <div className="min-h-0 overflow-hidden border border-[var(--gov-line)] bg-white">
-        <div className="flex items-center justify-between border-b border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-red)]">Live Feed Viewer</div>
-            <div className="mt-1 text-sm font-semibold text-[var(--gov-ink)]">{feed.address}</div>
-          </div>
-          <span className="border border-[var(--gov-blue)] bg-[rgba(0,56,147,0.08)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--gov-blue)]">
-            {systemEnabled ? "System output" : "Raw footage"}
-          </span>
-        </div>
-        <div className="aspect-video bg-black">
-          <FeedMedia feed={feed} systemEnabled={systemEnabled} detail />
-        </div>
-      </div>
-
-      <aside className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
-        <div className="border-b border-[var(--gov-line)] pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-blue)]">
-          Feed Metadata
-        </div>
-        <dl className="mt-3 space-y-3 text-sm">
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Location</dt>
-            <dd className="mt-1 text-[var(--gov-ink)]">{feed.location}</dd>
-          </div>
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Address</dt>
-            <dd className="mt-1 text-[var(--gov-ink)]">{feed.address}</dd>
-          </div>
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Map</dt>
-            <dd className="mt-1">
-              {feed.locationLink ? (
-                <a href={feed.locationLink} target="_blank" rel="noopener noreferrer" className="text-[var(--gov-blue)] underline underline-offset-4">
-                  Open location
-                </a>
-              ) : (
-                <span className="text-[var(--gov-muted)]">Not configured</span>
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Source clip</dt>
-            <dd className="mt-1">
-              {feed.videoUrl ? (
-                <a href={feed.videoUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--gov-blue)] underline underline-offset-4">
-                  Open source video
-                </a>
-              ) : (
-                <span className="text-[var(--gov-muted)]">Unavailable</span>
-              )}
-            </dd>
-          </div>
-        </dl>
-      </aside>
-    </section>
-  );
-}
-
 export default function LiveSurveillanceDashboard() {
   const { admin, logout } = useAdminSession();
   const [nav, setNav] = useState<NavKey>("live");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [feeds, setFeeds] = useState<SurveillanceFeed[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [systemEnabled, setSystemEnabled] = useState(false);
@@ -332,8 +288,6 @@ export default function LiveSurveillanceDashboard() {
     return feeds.filter((feed) => [feed.address, feed.location, feed.id].some((value) => value.toLowerCase().includes(query)));
   }, [deferredSearchQuery, feeds]);
 
-  const selected = useMemo(() => feeds.find((item) => item.id === selectedId) ?? null, [feeds, selectedId]);
-
   return (
     <DashboardShell
       title="Administrative Dashboard"
@@ -374,7 +328,6 @@ export default function LiveSurveillanceDashboard() {
                   }`}
                   onClick={() => {
                     setNav(item.key);
-                    setSelectedId(null);
                   }}
                 >
                   {item.label}
@@ -467,21 +420,19 @@ export default function LiveSurveillanceDashboard() {
               ) : null}
 
               {!isLoadingFeeds && !feedError ? (
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.1fr)]">
-                  <FeedRegistry
-                    feeds={filteredFeeds}
-                    selectedId={selectedId}
-                    onSelect={setSelectedId}
-                    systemEnabled={systemEnabled}
-                  />
-                  {selected ? (
-                    <FeedDetail feed={selected} systemEnabled={systemEnabled} />
+                <>
+                  {filteredFeeds.length > 0 ? (
+                    <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+                      {filteredFeeds.map((feed) => (
+                        <FeedTile key={feed.id} feed={feed} systemEnabled={systemEnabled} />
+                      ))}
+                    </div>
                   ) : (
                     <div className="border border-dashed border-[var(--gov-line-strong)] bg-[var(--gov-paper-alt)] px-4 py-8 text-sm text-[var(--gov-muted)]">
-                      Select a feed from the registry to open the live viewer and metadata panel.
+                      No feeds matched the current search.
                     </div>
                   )}
-                </div>
+                </>
               ) : null}
             </div>
           ) : null}

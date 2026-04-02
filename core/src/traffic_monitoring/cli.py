@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Display the annotated frames while processing.",
     )
     parser.add_argument(
+        "--hide-debug-lines",
+        action="store_true",
+        help="Hide reference/debug lines from the annotated output.",
+    )
+    parser.add_argument(
         "--system-mode",
         type=str,
         default="traffic_management_mode",

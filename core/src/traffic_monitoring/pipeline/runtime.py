@@ -273,6 +273,7 @@ class TrafficMonitoringPipeline:
                 line2_y_ratio=self.config.speed.line2_y,
                 hide_person_speed_labels=self.config.runtime_options.hide_person_speed_labels,
                 suppress_associated_person_boxes=self.config.runtime_options.suppress_associated_person_boxes,
+                show_debug_lines=self.config.runtime_options.show_debug_lines,
             )
         if self.enforcement_enabled:
             self.recorder.record(context, tracks, new_findings)

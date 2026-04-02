@@ -195,46 +195,48 @@ def annotate_frame(
     style: AnnotationStyle | None = None,
     hide_person_speed_labels: bool = False,
     suppress_associated_person_boxes: bool = False,
+    show_debug_lines: bool = True,
 ) -> np.ndarray:
     style = style or AnnotationStyle()
     annotated = frame.copy()
 
-    line1_y = int(context.height * line1_y_ratio)
-    line2_y = int(context.height * line2_y_ratio)
-    cv2.line(
-        annotated,
-        (0, line1_y),
-        (context.width, line1_y),
-        (0, 255, 255),
-        2,
-    )
-    cv2.line(
-        annotated,
-        (0, line2_y),
-        (context.width, line2_y),
-        (0, 0, 255),
-        2,
-    )
-    cv2.putText(
-        annotated,
-        "Line 1",
-        (12, max(20, line1_y - 8)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (0, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        annotated,
-        "Line 2",
-        (12, max(20, line2_y - 8)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (0, 0, 255),
-        2,
-        cv2.LINE_AA,
-    )
+    if show_debug_lines:
+        line1_y = int(context.height * line1_y_ratio)
+        line2_y = int(context.height * line2_y_ratio)
+        cv2.line(
+            annotated,
+            (0, line1_y),
+            (context.width, line1_y),
+            (0, 255, 255),
+            2,
+        )
+        cv2.line(
+            annotated,
+            (0, line2_y),
+            (context.width, line2_y),
+            (0, 0, 255),
+            2,
+        )
+        cv2.putText(
+            annotated,
+            "Line 1",
+            (12, max(20, line1_y - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            annotated,
+            "Line 2",
+            (12, max(20, line2_y - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
     for annotation in annotations_for_tracks(
         tracks,

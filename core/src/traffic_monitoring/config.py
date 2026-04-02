@@ -70,6 +70,7 @@ class RuntimeConfig:
     """Non-path runtime options."""
 
     show: bool = False
+    show_debug_lines: bool = True
     fps_override: float | None = 12.0
     frame_limit: int | None = None
     helmet_debug: bool = False
@@ -293,6 +294,7 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
     )
     runtime_options = RuntimeConfig(
         show=bool(getattr(namespace, "show", base.runtime_options.show)),
+        show_debug_lines=not bool(getattr(namespace, "hide_debug_lines", False)),
         fps_override=(
             float(getattr(namespace, "fps_override"))
             if getattr(namespace, "fps_override", 0.0)

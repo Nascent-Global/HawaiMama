@@ -1,31 +1,21 @@
 import AnimatedBackground from "@/components/AnimatedBackground";
+import AdminGate from "@/components/auth/AdminGate";
 import SurveillanceAdminPanel from "@/components/admin/SurveillanceAdminPanel";
-import { getCameraConfigs } from "@/lib/api";
-import type { SurveillanceCameraConfig } from "@/types/camera-config";
 
 export const dynamic = "force-dynamic";
 
-export default async function SurveillanceAdminRoute() {
-  let initialCameras: SurveillanceCameraConfig[] = [];
-  let initialError: string | null = null;
-
-  try {
-    initialCameras = await getCameraConfigs();
-  } catch (error) {
-    initialError =
-      error instanceof Error
-        ? error.message
-        : "Failed to load surveillance configuration";
-  }
-
+export default function SurveillanceAdminRoute() {
   return (
     <main className="app-shell">
       <AnimatedBackground />
       <div className="app-shell-inner">
-        <SurveillanceAdminPanel
-          initialCameras={initialCameras}
-          initialError={initialError}
-        />
+        <AdminGate
+          anyOfPermissions={["can_manage_feeds", "can_manage_admins"]}
+          deniedTitle="Feed admin unavailable"
+          deniedCopy="Your account can use the dashboard, but it cannot manage surveillance feeds or office access."
+        >
+          <SurveillanceAdminPanel />
+        </AdminGate>
       </div>
     </main>
   );

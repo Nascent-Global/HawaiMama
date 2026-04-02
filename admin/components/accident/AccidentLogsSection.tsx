@@ -10,7 +10,7 @@ function isStreamUrl(url: string): boolean {
   return url.includes('/camera/') && url.endsWith('/stream');
 }
 
-const AccidentLogsSection: React.FC = () => {
+const AccidentLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = false }) => {
   const [accidents, setAccidents] = useState<AccidentLog[]>([]);
   const [selected, setSelected] = useState<AccidentLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -175,7 +175,7 @@ const AccidentLogsSection: React.FC = () => {
                 >
                   View on Map
                 </a>
-                {!selected.verified && (
+                {!selected.verified && canVerify && (
                   <button
                     className="px-4 py-2 bg-[#3B82F6] text-white rounded font-medium hover:bg-blue-700"
                     disabled={verifyingId === selected.id}
@@ -183,6 +183,11 @@ const AccidentLogsSection: React.FC = () => {
                   >
                     {verifyingId === selected.id ? 'Verifying…' : 'Verify & Generate Report'}
                   </button>
+                )}
+                {!selected.verified && !canVerify && (
+                  <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded text-sm font-medium">
+                    Read-only access
+                  </span>
                 )}
                 {selected.verified && (
                   <span className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm font-medium">

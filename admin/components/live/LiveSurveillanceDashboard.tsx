@@ -4,11 +4,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
-import type { SurveillanceFeed } from "@/types/surveillance";
-import ViolationLogsSection from "@/components/violation/ViolationLogsSection";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import AccidentLogsSection from "@/components/accident/AccidentLogsSection";
 import ChallanLogsSection from "@/components/challan/ChallanLogsSection";
+import ViolationLogsSection from "@/components/violation/ViolationLogsSection";
+import { getSurveillanceFeeds } from "@/lib/api";
+import { canAccessPermission, useAdminSession } from "@/lib/auth";
+import type { SurveillanceFeed } from "@/types/surveillance";
 
 type NavKey = "live" | "violations" | "accidents" | "challan";
 
@@ -51,9 +53,7 @@ function SystemToggle({
       <div className="dash-system-toggle-copy">
         <span className="dash-system-toggle-label">System Output</span>
         <span className="dash-system-toggle-hint">
-          {enabled
-            ? "Uses each feed's admin mode"
-            : "Raw surveillance video"}
+          {enabled ? "Uses each feed's admin mode" : "Raw surveillance video"}
         </span>
       </div>
       <span
@@ -118,11 +118,7 @@ function FeedMedia({
   }
 
   if (systemEnabled && !detail) {
-    return (
-      <div className={`${className} feed-video--empty`}>
-        Processed preview unavailable
-      </div>
-    );
+    return <div className={`${className} feed-video--empty`}>Processed preview unavailable</div>;
   }
 
   if (feed.videoUrl) {
@@ -155,12 +151,16 @@ function FeedCard({
 }) {
   return (
     <article className="feed-card">
-      <div 
-        role="button" 
-        tabIndex={0} 
-        className="feed-card-inner" 
+      <div
+        role="button"
+        tabIndex={0}
+        className="feed-card-inner"
         onClick={onOpen}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(); }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            onOpen();
+          }
+        }}
       >
         <div className="feed-video-wrap">
           <span className="feed-live-dot" title="Live" />
@@ -175,14 +175,12 @@ function FeedCard({
                 href={feed.location}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
               >
                 {feed.location}
               </a>
             ) : (
-              <span className="feed-location-link feed-location-link--pseudo">
-                {feed.location}
-              </span>
+              <span className="feed-location-link feed-location-link--pseudo">{feed.location}</span>
             )}
           </div>
           <span className="feed-expand-icon" aria-hidden>
@@ -224,9 +222,7 @@ function FeedDetail({
             {feed.location}
           </a>
         ) : (
-          <span className="feed-detail-location feed-detail-location--pseudo">
-            {feed.location}
-          </span>
+          <span className="feed-detail-location feed-detail-location--pseudo">{feed.location}</span>
         )}
         {feed.videoUrl ? (
           <a
@@ -246,21 +242,78 @@ function FeedDetail({
   );
 }
 
-export default function LiveSurveillanceDashboard({
-  initialFeeds = [],
-  initialFeedError = null,
-}: {
-  initialFeeds?: SurveillanceFeed[];
-  initialFeedError?: string | null;
-}) {
+export default function LiveSurveillanceDashboard() {
+  const { admin, logout } = useAdminSession();
   const [nav, setNav] = useState<NavKey>("live");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [feeds] = useState<SurveillanceFeed[]>(initialFeeds);
+  const [feeds, setFeeds] = useState<SurveillanceFeed[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [systemEnabled, setSystemEnabled] = useState(false);
-  const [isLoadingFeeds] = useState(false);
-  const [feedError] = useState<string | null>(initialFeedError);
+  const [isLoadingFeeds, setIsLoadingFeeds] = useState(true);
+  const [feedError, setFeedError] = useState<string | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
+
+  const canViewLive = canAccessPermission(admin, "can_view_live");
+  const canManageFeeds = canAccessPermission(admin, "can_manage_feeds");
+  const canViewViolations = canAccessPermission(admin, "can_view_violations");
+  const canVerifyViolations = canAccessPermission(admin, "can_verify_violations");
+  const canViewAccidents = canAccessPermission(admin, "can_view_accidents");
+  const canVerifyAccidents = canAccessPermission(admin, "can_verify_accidents");
+  const canViewChallans = canAccessPermission(admin, "can_view_challans");
+
+  const visibleNavItems = useMemo(
+    () =>
+      navItems.filter((item) => {
+        if (item.key === "live") {
+          return canViewLive;
+        }
+        if (item.key === "violations") {
+          return canViewViolations;
+        }
+        if (item.key === "accidents") {
+          return canViewAccidents;
+        }
+        if (item.key === "challan") {
+          return canViewChallans;
+        }
+        return false;
+      }),
+    [canViewAccidents, canViewChallans, canViewLive, canViewViolations],
+  );
+
+  const activeNav = useMemo<NavKey | null>(() => {
+    if (visibleNavItems.length === 0) {
+      return null;
+    }
+    return visibleNavItems.some((item) => item.key === nav) ? nav : visibleNavItems[0].key;
+  }, [nav, visibleNavItems]);
+
+  useEffect(() => {
+    if (!admin || !canViewLive) {
+      return;
+    }
+    let active = true;
+    void getSurveillanceFeeds()
+      .then((data) => {
+        if (active) {
+          setFeeds(data);
+          setFeedError(null);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setFeedError(error instanceof Error ? error.message : "Failed to load surveillance feeds");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingFeeds(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [admin, canViewLive]);
 
   const filteredFeeds = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
@@ -268,14 +321,13 @@ export default function LiveSurveillanceDashboard({
       return feeds;
     }
     return feeds.filter((feed) =>
-      [feed.address, feed.location, feed.id].some((value) =>
-        value.toLowerCase().includes(query)
-      )
+      [feed.address, feed.location, feed.id].some((value) => value.toLowerCase().includes(query)),
     );
   }, [deferredSearchQuery, feeds]);
+
   const selected = useMemo(
-    () => feeds.find((f) => f.id === selectedId) ?? null,
-    [feeds, selectedId]
+    () => feeds.find((candidate) => candidate.id === selectedId) ?? null,
+    [feeds, selectedId],
   );
 
   return (
@@ -293,9 +345,7 @@ export default function LiveSurveillanceDashboard({
                 priority
                 sizes="(max-width: 400px) 160px, 200px"
               />
-              <p className="logo-strip-tagline">
-                Smart Traffic Management and Incident Response System
-              </p>
+              <p className="logo-strip-tagline">Smart Traffic Management and Incident Response System</p>
             </div>
           </div>
         </header>
@@ -311,27 +361,34 @@ export default function LiveSurveillanceDashboard({
             />
             <SearchIcon />
           </div>
-          <SystemToggle
-            enabled={systemEnabled}
-            onChange={setSystemEnabled}
-          />
-          <Link
-            href="/admin"
-            className="dash-utility-link"
-          >
-            Feed Admin
-          </Link>
+          <SystemToggle enabled={systemEnabled} onChange={setSystemEnabled} />
+          {admin ? (
+            <div className="dash-session-pill">
+              <div>
+                <div className="dash-session-name">{admin.full_name}</div>
+                <div className="dash-session-role">{admin.role === "superadmin" ? "Superadmin" : "Admin"}</div>
+              </div>
+              <button type="button" className="dash-session-logout" onClick={() => void logout()}>
+                Logout
+              </button>
+            </div>
+          ) : null}
+          {canManageFeeds ? (
+            <Link href="/admin" className="dash-utility-link">
+              Feed Admin
+            </Link>
+          ) : null}
         </div>
       </div>
 
       <div className="dash-body">
         <aside className="dash-sidebar" aria-label="Sections">
           <nav className="dash-nav" aria-label="Main">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <button
                 key={item.key}
                 type="button"
-                className={`dash-nav-btn${nav === item.key ? " dash-nav-btn--active" : ""}`}
+                className={`dash-nav-btn${activeNav === item.key ? " dash-nav-btn--active" : ""}`}
                 onClick={() => {
                   setNav(item.key);
                   setSelectedId(null);
@@ -344,41 +401,37 @@ export default function LiveSurveillanceDashboard({
         </aside>
 
         <div className="dash-main">
-          {nav === "violations" && (
-            <ViolationLogsSection />
-          )}
-
-          {nav === "accidents" && (
-            <AccidentLogsSection />
-          )}
-
-          {nav === "challan" && (
-            <ChallanLogsSection />
-          )}
-
-          {nav !== "live" && nav !== "violations" && nav !== "accidents" && nav !== "challan" && (
+          {visibleNavItems.length === 0 ? (
             <div className="dash-placeholder card-glass">
-              <h2 className="dash-placeholder-title">
-                {navItems.find((n) => n.key === nav)?.label}
-              </h2>
-              <p>Section coming next — Live surveillance is wired first.</p>
+              <h2 className="dash-placeholder-title">No sections assigned</h2>
+              <p>Your account is active, but it has not been granted any panel permissions yet.</p>
             </div>
-          )}
+          ) : null}
 
-          {nav === "live" && !selected && (
+          {activeNav === "violations" && canViewViolations ? (
+            <ViolationLogsSection canVerify={canVerifyViolations} />
+          ) : null}
+
+          {activeNav === "accidents" && canViewAccidents ? (
+            <AccidentLogsSection canVerify={canVerifyAccidents} />
+          ) : null}
+
+          {activeNav === "challan" && canViewChallans ? <ChallanLogsSection /> : null}
+
+          {activeNav === "live" && canViewLive && !selected ? (
             <div className="feed-grid-scroll">
-              {isLoadingFeeds && (
+              {isLoadingFeeds ? (
                 <div className="dash-placeholder card-glass">
                   <h2 className="dash-placeholder-title">Loading live feeds</h2>
                   <p>Connecting to the Python stream server.</p>
                 </div>
-              )}
-              {feedError && (
+              ) : null}
+              {feedError ? (
                 <div className="dash-placeholder card-glass">
                   <h2 className="dash-placeholder-title">Live feed unavailable</h2>
                   <p>{feedError}</p>
                 </div>
-              )}
+              ) : null}
               <div className="feed-grid">
                 {filteredFeeds.map((feed) => (
                   <FeedCard
@@ -389,22 +442,18 @@ export default function LiveSurveillanceDashboard({
                   />
                 ))}
               </div>
-              {!isLoadingFeeds && !feedError && filteredFeeds.length === 0 && (
+              {!isLoadingFeeds && !feedError && filteredFeeds.length === 0 ? (
                 <div className="dash-placeholder card-glass">
                   <h2 className="dash-placeholder-title">No cameras matched</h2>
                   <p>Try a different search term.</p>
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
-          {nav === "live" && selected && (
-            <FeedDetail
-              feed={selected}
-              systemEnabled={systemEnabled}
-              onBack={() => setSelectedId(null)}
-            />
-          )}
+          {activeNav === "live" && canViewLive && selected ? (
+            <FeedDetail feed={selected} systemEnabled={systemEnabled} onBack={() => setSelectedId(null)} />
+          ) : null}
         </div>
       </div>
     </div>

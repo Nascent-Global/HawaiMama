@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -10,17 +11,19 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 import cv2
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from traffic_monitoring.auth import hash_password
 from traffic_monitoring.config import TrafficMonitoringConfig, apply_input_overrides, build_default_config
 from traffic_monitoring.events import ViolationCode
 from traffic_monitoring.mock_dotm_service import load_mock_dotm_service
@@ -81,8 +84,8 @@ def _timestamp_to_iso(timestamp_seconds: float) -> str:
 app = FastAPI(title="Traffic Monitoring Stream Server")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[origin.strip() for origin in os.environ.get("ADMIN_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -122,7 +125,6 @@ app.mount(
 
 cameras: dict[str, dict[str, object]] = _build_camera_registry(_base_config.root)
 repository = AdminRepository(default_database_url(), project_root=_base_config.root)
-repository.initialize(cameras)
 object_storage = build_object_storage(_base_config.root)
 vehicle_registry = load_mock_dotm_service(_base_config.root)
 
@@ -141,6 +143,7 @@ _api_event_codes = {
 _intersection_signal_machines: dict[str, SignalStateMachine] = {}
 _VIOLATION_CLIP_PRE_SECONDS = 3.0
 _VIOLATION_CLIP_MAX_SECONDS = 6.0
+_SESSION_COOKIE_NAME = "hawaimama_session"
 
 
 class CameraConfigUpdate(BaseModel):
@@ -148,9 +151,227 @@ class CameraConfigUpdate(BaseModel):
     location: str | None = None
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AdminAccountCreate(BaseModel):
+    username: str
+    full_name: str
+    password: str
+    role: Literal["superadmin", "admin"] = "admin"
+    is_active: bool = True
+    all_locations: bool = False
+    allowed_locations: list[str] = []
+    permissions: dict[str, bool] | None = None
+
+
+class AdminAccountUpdate(BaseModel):
+    full_name: str | None = None
+    password: str | None = None
+    role: Literal["superadmin", "admin"] | None = None
+    is_active: bool | None = None
+    all_locations: bool | None = None
+    allowed_locations: list[str] | None = None
+    permissions: dict[str, bool] | None = None
+
+
+def _normalize_location(value: str | None) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _default_permissions(*, superadmin: bool = False) -> dict[str, bool]:
+    permissions = {
+        "can_view_live": True,
+        "can_manage_feeds": True,
+        "can_view_violations": True,
+        "can_verify_violations": True,
+        "can_view_accidents": True,
+        "can_verify_accidents": True,
+        "can_view_challans": True,
+        "can_manage_admins": False,
+    }
+    if superadmin:
+        permissions["can_manage_admins"] = True
+    return permissions
+
+
+def _bootstrap_admin_accounts() -> list[dict[str, object]]:
+    superadmin_username = os.environ.get("SUPERADMIN_USERNAME", "superadmin")
+    superadmin_password = os.environ.get("SUPERADMIN_PASSWORD", "superadmin123")
+    superadmin_full_name = os.environ.get("SUPERADMIN_FULL_NAME", "System Superadmin")
+    default_admin_username = os.environ.get("DEFAULT_ADMIN_USERNAME", "admin")
+    default_admin_password = os.environ.get("DEFAULT_ADMIN_PASSWORD", "admin123")
+    default_admin_full_name = os.environ.get("DEFAULT_ADMIN_FULL_NAME", "Default Office Admin")
+
+    return [
+        {
+            "username": superadmin_username,
+            "full_name": superadmin_full_name,
+            "password_hash": hash_password(superadmin_password),
+            "role": "superadmin",
+            "is_active": True,
+            "all_locations": True,
+            "allowed_locations": [],
+            "permissions": _default_permissions(superadmin=True),
+        },
+        {
+            "username": default_admin_username,
+            "full_name": default_admin_full_name,
+            "password_hash": hash_password(default_admin_password),
+            "role": "admin",
+            "is_active": True,
+            "all_locations": True,
+            "allowed_locations": [],
+            "permissions": _default_permissions(superadmin=False),
+        },
+    ]
+
+
+repository.initialize(cameras, bootstrap_admins=_bootstrap_admin_accounts())
+
+
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "unknown"
+
+
+def _read_session_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", maxsplit=1)[1].strip()
+        if token:
+            return token
+    cookie_token = request.cookies.get(_SESSION_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    return None
+
+
+def _permission_enabled(admin: dict[str, Any], permission: str) -> bool:
+    if admin.get("role") == "superadmin":
+        return True
+    permissions = admin.get("permissions", {})
+    return bool(permissions.get(permission, False))
+
+
+def _can_access_location(admin: dict[str, Any], location: str | None) -> bool:
+    if admin.get("role") == "superadmin" or admin.get("all_locations"):
+        return True
+    normalized = _normalize_location(location)
+    if not normalized:
+        return False
+    allowed_locations = {
+        _normalize_location(value)
+        for value in admin.get("allowed_locations", [])
+        if _normalize_location(value)
+    }
+    return normalized in allowed_locations
+
+
+def _camera_location_for_id(camera_id: str | None) -> str | None:
+    if not camera_id:
+        return None
+    _refresh_camera_inventory()
+    camera = cameras.get(camera_id)
+    if camera is None:
+        return None
+    return str(camera.get("location", "")).strip() or None
+
+
+def _extract_record_location(record: dict[str, Any]) -> str | None:
+    camera_location = str(record.get("cameraLocation") or "").strip()
+    if camera_location:
+        return camera_location
+    nested_location = record.get("location")
+    if isinstance(nested_location, dict):
+        place = str(nested_location.get("place") or "").strip()
+        if place:
+            return place
+    for key in ("address", "tempAddress", "ownerAddress"):
+        value = str(record.get(key) or "").strip()
+        if value:
+            return value
+    direct_location = str(record.get("location") or "").strip()
+    if direct_location and not direct_location.startswith("http"):
+        return direct_location
+    return None
+
+
+def _filter_records_for_admin(admin: dict[str, Any], records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in records
+        if _can_access_location(admin, _extract_record_location(record))
+    ]
+
+
+def _require_admin(request: Request, *, permission: str | None = None) -> dict[str, Any]:
+    admin = getattr(request.state, "admin", None)
+    if admin is None:
+        token = _read_session_token(request)
+        if token:
+            admin = repository.get_session_admin(token)
+            if admin is not None:
+                request.state.admin = admin
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if permission and not _permission_enabled(admin, permission):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return admin
+
+
+def _guard_record_access(admin: dict[str, Any], record: dict[str, Any], *, detail: str = "Resource access denied") -> None:
+    if not _can_access_location(admin, _extract_record_location(record)):
+        raise HTTPException(status_code=403, detail=detail)
+
+
+def _media_camera_id_from_path(path: str) -> str | None:
+    parts = [part for part in path.split("/") if part]
+    if len(parts) >= 2 and parts[0] in {"surveillance-media", "surveillance-output"}:
+        return Path(parts[1]).stem.lower()
+    if len(parts) >= 3 and parts[0] == "camera" and parts[2] == "stream":
+        return parts[1].lower()
+    if len(parts) >= 6 and parts[0] == "wwwroots" and parts[1] == "violations":
+        camera_segment = parts[5]
+        return camera_segment.split("-", maxsplit=1)[0].lower()
+    return None
+
+
+def _is_public_backend_path(path: str) -> bool:
+    return path in {"/auth/login", "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect"}
+
+
+def _is_protected_media_path(path: str) -> bool:
+    return (
+        path.startswith("/surveillance-media/")
+        or path.startswith("/surveillance-output/")
+        or path.startswith("/wwwroots/")
+        or (path.startswith("/camera/") and path.endswith("/stream"))
+    )
+
+
+@app.middleware("http")
+async def admin_session_middleware(request: Request, call_next):
+    if request.method == "OPTIONS" or _is_public_backend_path(request.url.path):
+        return await call_next(request)
+
+    token = _read_session_token(request)
+    if token:
+        request.state.admin = repository.get_session_admin(token)
+
+    if _is_protected_media_path(request.url.path):
+        admin = getattr(request.state, "admin", None)
+        if admin is None:
+            return JSONResponse({"detail": "Authentication required"}, status_code=401)
+        if not _permission_enabled(admin, "can_view_live"):
+            return JSONResponse({"detail": "Insufficient permissions"}, status_code=403)
+        camera_id = _media_camera_id_from_path(request.url.path)
+        if camera_id and not _can_access_location(admin, _camera_location_for_id(camera_id)):
+            return JSONResponse({"detail": "Location access denied"}, status_code=403)
+
+    return await call_next(request)
 
 
 def _camera_location(camera_id: str) -> str:
@@ -671,19 +892,112 @@ def mjpeg_frame_generator(camera_id: str) -> Iterator[bytes]:
 
 
 @app.get("/video_feed")
-def video_feed() -> StreamingResponse:
+def video_feed(request: Request) -> StreamingResponse:
+    admin = _require_admin(request, permission="can_view_live")
     _refresh_camera_inventory()
     if not cameras:
         raise HTTPException(status_code=404, detail="No surveillance videos found")
+    accessible_camera = next(
+        (
+            camera_id
+            for camera_id in cameras
+            if _can_access_location(admin, _camera_location_for_id(camera_id))
+        ),
+        None,
+    )
+    if accessible_camera is None:
+        raise HTTPException(status_code=403, detail="No live feeds available for this account")
     return StreamingResponse(
-        mjpeg_frame_generator(next(iter(cameras))),
+        mjpeg_frame_generator(accessible_camera),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
 
+@app.post("/auth/login")
+def login_admin(payload: LoginRequest) -> JSONResponse:
+    admin = repository.authenticate_admin(payload.username, payload.password)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = repository.create_admin_session(admin["id"])
+    response = JSONResponse({"admin": admin, "token": token})
+    response.set_cookie(
+        _SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=24 * 60 * 60,
+    )
+    return response
+
+
+@app.post("/auth/logout")
+def logout_admin(request: Request) -> JSONResponse:
+    token = _read_session_token(request)
+    if token:
+        repository.revoke_session(token)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(_SESSION_COOKIE_NAME, samesite="lax")
+    return response
+
+
+@app.get("/auth/me")
+def current_admin(request: Request) -> JSONResponse:
+    return JSONResponse(_require_admin(request))
+
+
+@app.get("/auth/admins")
+def list_admin_accounts(request: Request) -> JSONResponse:
+    _require_admin(request, permission="can_manage_admins")
+    return JSONResponse(repository.list_admin_accounts())
+
+
+@app.post("/auth/admins")
+def create_admin_account(request: Request, payload: AdminAccountCreate) -> JSONResponse:
+    _require_admin(request, permission="can_manage_admins")
+    try:
+        admin = repository.create_admin_account(
+            username=payload.username.strip(),
+            full_name=payload.full_name.strip(),
+            password_hash=hash_password(payload.password),
+            role=payload.role,
+            is_active=payload.is_active,
+            all_locations=payload.all_locations,
+            allowed_locations=payload.allowed_locations,
+            permissions=payload.permissions or _default_permissions(superadmin=payload.role == "superadmin"),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to create admin account: {exc}") from exc
+    return JSONResponse(admin)
+
+
+@app.patch("/auth/admins/{admin_id}")
+def update_admin_account(request: Request, admin_id: str, payload: AdminAccountUpdate) -> JSONResponse:
+    _require_admin(request, permission="can_manage_admins")
+    next_permissions = payload.permissions
+    if payload.role == "superadmin" and next_permissions is None:
+        next_permissions = _default_permissions(superadmin=True)
+    admin = repository.update_admin_account(
+        admin_id,
+        full_name=payload.full_name.strip() if payload.full_name else None,
+        password_hash=hash_password(payload.password) if payload.password else None,
+        role=payload.role,
+        is_active=payload.is_active,
+        all_locations=payload.all_locations,
+        allowed_locations=payload.allowed_locations,
+        permissions=next_permissions,
+    )
+    if admin is None:
+        raise HTTPException(status_code=404, detail=f"Unknown admin account: {admin_id}")
+    return JSONResponse(admin)
+
+
 @app.get("/camera/{camera_id}/stream")
-def camera_stream(camera_id: str) -> StreamingResponse:
+def camera_stream(camera_id: str, request: Request) -> StreamingResponse:
+    admin = _require_admin(request, permission="can_view_live")
     _refresh_camera_inventory()
+    if not _can_access_location(admin, _camera_location_for_id(camera_id)):
+        raise HTTPException(status_code=403, detail="Location access denied")
     return StreamingResponse(
         mjpeg_frame_generator(camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -691,36 +1005,45 @@ def camera_stream(camera_id: str) -> StreamingResponse:
 
 
 @app.get("/surveillance/feeds")
-def surveillance_feeds() -> JSONResponse:
+def surveillance_feeds(request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_live")
     _refresh_camera_inventory()
-    return JSONResponse(repository.list_surveillance_feeds())
+    feeds = _filter_records_for_admin(admin, repository.list_surveillance_feeds())
+    return JSONResponse(feeds)
 
 
 @app.get("/vehicle/{plate}")
-def vehicle_lookup(plate: str) -> JSONResponse:
+def vehicle_lookup(plate: str, request: Request) -> JSONResponse:
+    _require_admin(request)
     return JSONResponse(vehicle_registry.api_response(plate))
 
 
 @app.get("/events")
-def list_events() -> JSONResponse:
-    return JSONResponse(events)
+def list_events(request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_violations")
+    return JSONResponse(_filter_records_for_admin(admin, events))
 
 
 @app.get("/cameras")
-def list_cameras() -> JSONResponse:
+def list_cameras(request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_live")
     _refresh_camera_inventory()
-    return JSONResponse(repository.list_cameras())
+    return JSONResponse(_filter_records_for_admin(admin, repository.list_cameras()))
 
 
 @app.get("/admin/cameras")
-def list_camera_configs() -> JSONResponse:
+def list_camera_configs(request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_manage_feeds")
     _refresh_camera_inventory()
-    return JSONResponse(repository.list_cameras())
+    return JSONResponse(_filter_records_for_admin(admin, repository.list_cameras()))
 
 
 @app.patch("/admin/cameras/{camera_id}")
-def update_camera_config(camera_id: str, update: CameraConfigUpdate) -> JSONResponse:
+def update_camera_config(camera_id: str, update: CameraConfigUpdate, request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_manage_feeds")
     _refresh_camera_inventory()
+    if not _can_access_location(admin, _camera_location_for_id(camera_id)):
+        raise HTTPException(status_code=403, detail="Location access denied")
 
     camera = repository.update_camera_config(
         camera_id,
@@ -740,10 +1063,12 @@ def update_camera_config(camera_id: str, update: CameraConfigUpdate) -> JSONResp
 
 @app.post("/admin/cameras")
 async def create_camera_config(
+    request: Request,
     file: UploadFile = File(...),
     location: str = Form(...),
     system_mode: Literal["enforcement_mode", "traffic_management_mode"] = Form("enforcement_mode"),
 ) -> JSONResponse:
+    _require_admin(request, permission="can_manage_feeds")
     location_value = location.strip()
     if not location_value:
         raise HTTPException(status_code=400, detail="Location is required")
@@ -788,7 +1113,10 @@ async def create_camera_config(
 
 
 @app.delete("/admin/cameras/{camera_id}")
-def delete_camera_config(camera_id: str) -> JSONResponse:
+def delete_camera_config(camera_id: str, request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_manage_feeds")
+    if not _can_access_location(admin, _camera_location_for_id(camera_id)):
+        raise HTTPException(status_code=403, detail="Location access denied")
     source_path = _surveillance_source_path(camera_id)
     source_path.unlink(missing_ok=True)
 
@@ -807,20 +1135,28 @@ def delete_camera_config(camera_id: str) -> JSONResponse:
 
 
 @app.get("/violations")
-def list_violations() -> JSONResponse:
-    return JSONResponse(repository.list_violations())
+def list_violations(request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_violations")
+    return JSONResponse(_filter_records_for_admin(admin, repository.list_violations()))
 
 
 @app.get("/violations/{violation_id}")
-def get_violation(violation_id: str) -> JSONResponse:
+def get_violation(violation_id: str, request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_violations")
     violation = repository.get_violation(violation_id)
     if violation is None:
         raise HTTPException(status_code=404, detail=f"Unknown violation: {violation_id}")
+    _guard_record_access(admin, violation, detail="Location access denied")
     return JSONResponse(violation)
 
 
 @app.post("/violations/{violation_id}/verify")
-def verify_violation(violation_id: str) -> JSONResponse:
+def verify_violation(violation_id: str, request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_verify_violations")
+    violation = repository.get_violation(violation_id)
+    if violation is None:
+        raise HTTPException(status_code=404, detail=f"Unknown violation: {violation_id}")
+    _guard_record_access(admin, violation, detail="Location access denied")
     result = repository.verify_violation(violation_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown violation: {violation_id}")
@@ -828,20 +1164,28 @@ def verify_violation(violation_id: str) -> JSONResponse:
 
 
 @app.get("/accidents")
-def list_accidents() -> JSONResponse:
-    return JSONResponse(repository.list_accidents())
+def list_accidents(request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_accidents")
+    return JSONResponse(_filter_records_for_admin(admin, repository.list_accidents()))
 
 
 @app.get("/accidents/{accident_id}")
-def get_accident(accident_id: str) -> JSONResponse:
+def get_accident(accident_id: str, request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_accidents")
     accident = repository.get_accident(accident_id)
     if accident is None:
         raise HTTPException(status_code=404, detail=f"Unknown accident: {accident_id}")
+    _guard_record_access(admin, accident, detail="Location access denied")
     return JSONResponse(accident)
 
 
 @app.post("/accidents/{accident_id}/verify")
-def verify_accident(accident_id: str) -> JSONResponse:
+def verify_accident(accident_id: str, request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_verify_accidents")
+    accident = repository.get_accident(accident_id)
+    if accident is None:
+        raise HTTPException(status_code=404, detail=f"Unknown accident: {accident_id}")
+    _guard_record_access(admin, accident, detail="Location access denied")
     result = repository.verify_accident(accident_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown accident: {accident_id}")
@@ -849,20 +1193,24 @@ def verify_accident(accident_id: str) -> JSONResponse:
 
 
 @app.get("/challans")
-def list_challans() -> JSONResponse:
-    return JSONResponse(repository.list_challans())
+def list_challans(request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_challans")
+    return JSONResponse(_filter_records_for_admin(admin, repository.list_challans()))
 
 
 @app.get("/challans/{challan_id}")
-def get_challan(challan_id: str) -> JSONResponse:
+def get_challan(challan_id: str, request: Request) -> JSONResponse:
+    admin = _require_admin(request, permission="can_view_challans")
     challan = repository.get_challan(challan_id)
     if challan is None:
         raise HTTPException(status_code=404, detail=f"Unknown challan: {challan_id}")
+    _guard_record_access(admin, challan, detail="Location access denied")
     return JSONResponse(challan)
 
 
 @app.get("/traffic/state")
-def traffic_state() -> JSONResponse:
+def traffic_state(request: Request) -> JSONResponse:
+    _require_admin(request, permission="can_view_live")
     if intersection_state_by_id:
         intersection_id = next(reversed(intersection_state_by_id))
         latest = intersection_state_by_id[intersection_id]
@@ -871,7 +1219,8 @@ def traffic_state() -> JSONResponse:
 
 
 @app.get("/traffic/lanes")
-def traffic_lanes() -> JSONResponse:
+def traffic_lanes(request: Request) -> JSONResponse:
+    _require_admin(request, permission="can_view_live")
     if intersection_state_by_id:
         intersection_id = next(reversed(intersection_state_by_id))
         latest = intersection_state_by_id[intersection_id]

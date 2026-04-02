@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -10,6 +10,8 @@ from uuid import uuid4
 from psycopg import Connection, connect
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+
+from traffic_monitoring.auth import create_session_token, hash_session_token, verify_password
 
 
 def default_database_url() -> str:
@@ -56,16 +58,222 @@ class AdminRepository:
     def initialize(
         self,
         cameras: dict[str, dict[str, object]],
+        *,
+        bootstrap_admins: list[dict[str, Any]] | None = None,
     ) -> None:
         with self._connect() as connection:
             self._create_tables(connection)
             self._sync_cameras(connection, cameras)
+            self._ensure_admin_accounts(connection, bootstrap_admins or [])
             connection.commit()
 
     def sync_cameras(self, cameras: dict[str, dict[str, object]]) -> None:
         with self._connect() as connection:
             self._create_tables(connection)
             self._sync_cameras(connection, cameras)
+            connection.commit()
+
+    def list_admin_accounts(self) -> list[dict[str, Any]]:
+        query = """
+        SELECT id, username, full_name, role, is_active, all_locations, allowed_locations_json, permissions_json
+        FROM admins
+        ORDER BY role DESC, username ASC
+        """
+        with self._connect() as connection:
+            rows = connection.execute(query).fetchall()
+        return [self._serialize_admin(row) for row in rows]
+
+    def create_admin_account(
+        self,
+        *,
+        username: str,
+        full_name: str,
+        password_hash: str,
+        role: str,
+        is_active: bool,
+        all_locations: bool,
+        allowed_locations: list[str],
+        permissions: dict[str, Any],
+    ) -> dict[str, Any]:
+        admin_id = str(uuid4())
+        now = _utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO admins (
+                    id,
+                    username,
+                    full_name,
+                    password_hash,
+                    role,
+                    is_active,
+                    all_locations,
+                    allowed_locations_json,
+                    permissions_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    admin_id,
+                    username,
+                    full_name,
+                    password_hash,
+                    role,
+                    is_active,
+                    all_locations,
+                    Jsonb(allowed_locations),
+                    Jsonb(permissions),
+                    now,
+                    now,
+                ),
+            )
+            connection.commit()
+            row = connection.execute(
+                """
+                SELECT id, username, full_name, role, is_active, all_locations, allowed_locations_json, permissions_json
+                FROM admins
+                WHERE id = %s
+                """,
+                (admin_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Failed to create admin account")
+        return self._serialize_admin(row)
+
+    def update_admin_account(
+        self,
+        admin_id: str,
+        *,
+        full_name: str | None = None,
+        password_hash: str | None = None,
+        role: str | None = None,
+        is_active: bool | None = None,
+        all_locations: bool | None = None,
+        allowed_locations: list[str] | None = None,
+        permissions: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM admins
+                WHERE id = %s
+                """,
+                (admin_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE admins
+                SET full_name = %s,
+                    password_hash = %s,
+                    role = %s,
+                    is_active = %s,
+                    all_locations = %s,
+                    allowed_locations_json = %s,
+                    permissions_json = %s,
+                    updated_at = %s
+                WHERE id = %s
+                """,
+                (
+                    full_name or row["full_name"],
+                    password_hash or row["password_hash"],
+                    role or row["role"],
+                    row["is_active"] if is_active is None else is_active,
+                    row["all_locations"] if all_locations is None else all_locations,
+                    Jsonb(
+                        _coerce_json(row["allowed_locations_json"], [])
+                        if allowed_locations is None
+                        else allowed_locations
+                    ),
+                    Jsonb(
+                        _coerce_json(row["permissions_json"], {})
+                        if permissions is None
+                        else permissions
+                    ),
+                    _utc_now(),
+                    admin_id,
+                ),
+            )
+            connection.commit()
+        return self.get_admin_account(admin_id)
+
+    def get_admin_account(self, admin_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, username, full_name, role, is_active, all_locations, allowed_locations_json, permissions_json
+                FROM admins
+                WHERE id = %s
+                """,
+                (admin_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._serialize_admin(row)
+
+    def authenticate_admin(self, username: str, password: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM admins
+                WHERE lower(username) = lower(%s)
+                """,
+                (username,),
+            ).fetchone()
+        if row is None or not row["is_active"]:
+            return None
+        if not verify_password(password, row["password_hash"]):
+            return None
+        return self._serialize_admin(row)
+
+    def create_admin_session(self, admin_id: str, *, ttl_hours: int = 24) -> str:
+        token = create_session_token()
+        now = _utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO admin_sessions (id, admin_id, token_hash, expires_at, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    str(uuid4()),
+                    admin_id,
+                    hash_session_token(token),
+                    now + timedelta(hours=ttl_hours),
+                    now,
+                ),
+            )
+            connection.commit()
+        return token
+
+    def get_session_admin(self, token: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT a.id, a.username, a.full_name, a.role, a.is_active, a.all_locations, a.allowed_locations_json, a.permissions_json
+                FROM admin_sessions s
+                JOIN admins a ON a.id = s.admin_id
+                WHERE s.token_hash = %s
+                  AND s.expires_at > %s
+                  AND a.is_active = TRUE
+                """,
+                (hash_session_token(token), _utc_now()),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._serialize_admin(row)
+
+    def revoke_session(self, token: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM admin_sessions WHERE token_hash = %s",
+                (hash_session_token(token),),
+            )
             connection.commit()
 
     def list_cameras(self) -> list[dict[str, Any]]:
@@ -369,6 +577,34 @@ class AdminRepository:
     def _create_tables(self, connection: Connection[Any]) -> None:
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS admins (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                full_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                all_locations BOOLEAN NOT NULL DEFAULT FALSE,
+                allowed_locations_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                permissions_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                id TEXT PRIMARY KEY,
+                admin_id TEXT NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS cameras (
                 camera_id TEXT PRIMARY KEY,
                 location TEXT NOT NULL,
@@ -416,6 +652,9 @@ class AdminRepository:
                 payload_json JSONB NOT NULL
             )
             """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS admin_sessions_expires_at_idx ON admin_sessions (expires_at)"
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS violations_event_time_idx ON violations (event_time DESC)"
@@ -466,6 +705,9 @@ class AdminRepository:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (camera_id) DO UPDATE SET
                     source = EXCLUDED.source,
+                    location = EXCLUDED.location,
+                    status = EXCLUDED.status,
+                    system_mode = EXCLUDED.system_mode,
                     metadata_json = EXCLUDED.metadata_json,
                     updated_at = EXCLUDED.updated_at
                 """,
@@ -480,6 +722,92 @@ class AdminRepository:
                     now,
                 ),
             )
+
+    def _ensure_admin_accounts(
+        self,
+        connection: Connection[Any],
+        accounts: list[dict[str, Any]],
+    ) -> None:
+        now = _utc_now()
+        for account in accounts:
+            row = connection.execute(
+                """
+                SELECT id
+                FROM admins
+                WHERE lower(username) = lower(%s)
+                """,
+                (account["username"],),
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    """
+                    INSERT INTO admins (
+                        id,
+                        username,
+                        full_name,
+                        password_hash,
+                        role,
+                        is_active,
+                        all_locations,
+                        allowed_locations_json,
+                        permissions_json,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        str(uuid4()),
+                        account["username"],
+                        account["full_name"],
+                        account["password_hash"],
+                        account["role"],
+                        bool(account.get("is_active", True)),
+                        bool(account.get("all_locations", False)),
+                        Jsonb(account.get("allowed_locations", [])),
+                        Jsonb(account.get("permissions", {})),
+                        now,
+                        now,
+                    ),
+                )
+                continue
+            connection.execute(
+                """
+                UPDATE admins
+                SET full_name = %s,
+                    password_hash = %s,
+                    role = %s,
+                    is_active = %s,
+                    all_locations = %s,
+                    allowed_locations_json = %s,
+                    permissions_json = %s,
+                    updated_at = %s
+                WHERE lower(username) = lower(%s)
+                """,
+                (
+                    account["full_name"],
+                    account["password_hash"],
+                    account["role"],
+                    bool(account.get("is_active", True)),
+                    bool(account.get("all_locations", False)),
+                    Jsonb(account.get("allowed_locations", [])),
+                    Jsonb(account.get("permissions", {})),
+                    now,
+                    account["username"],
+                ),
+            )
+
+    def _serialize_admin(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "full_name": row["full_name"],
+            "role": row["role"],
+            "is_active": bool(row["is_active"]),
+            "all_locations": bool(row["all_locations"]),
+            "allowed_locations": list(_coerce_json(row["allowed_locations_json"], [])),
+            "permissions": dict(_coerce_json(row["permissions_json"], {})),
+        }
 
     def _list_payload_table(self, table_name: str, *, order_by: str) -> list[dict[str, Any]]:
         query = f"SELECT payload_json FROM {table_name} ORDER BY {order_by}"
@@ -576,7 +904,11 @@ class AdminRepository:
                 "pointsDeducted": int(offense_policy["points_deducted"]),
             },
             "location": {
-                "place": str(violation.get("tempAddress", "Unknown Location")),
+                "place": str(
+                    violation.get("cameraLocation")
+                    or violation.get("tempAddress")
+                    or "Unknown Location"
+                ),
                 "district": "Kaski",
                 "mapLink": str(violation.get("locationLink", "")),
                 "coordinates": {

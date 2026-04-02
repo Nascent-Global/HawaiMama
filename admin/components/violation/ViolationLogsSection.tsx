@@ -23,7 +23,7 @@ function evidenceVideoLabel(violation: ViolationLog): string {
   return 'Source clip';
 }
 
-const ViolationLogsSection: React.FC = () => {
+const ViolationLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = false }) => {
   const [violations, setViolations] = useState<ViolationLog[]>([]);
   const [selected, setSelected] = useState<ViolationLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -260,7 +260,7 @@ const ViolationLogsSection: React.FC = () => {
                 >
                   View on Map
                 </a>
-                {!selected.verified && (
+                {!selected.verified && canVerify && (
                   <button
                     className="px-4 py-2 bg-[#3B82F6] text-white rounded font-medium hover:bg-blue-700"
                     disabled={verifyingId === selected.id}
@@ -268,6 +268,11 @@ const ViolationLogsSection: React.FC = () => {
                   >
                     {verifyingId === selected.id ? 'Verifying…' : 'Verify & Generate Challan'}
                   </button>
+                )}
+                {!selected.verified && !canVerify && (
+                  <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded text-sm font-medium">
+                    Read-only access
+                  </span>
                 )}
                 {selected.verified && (
                   <span className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm font-medium">

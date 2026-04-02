@@ -7,9 +7,10 @@ import Link from "next/link";
 import {
   useDeferredValue,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { getCameraConfigs, updateCameraConfig } from "@/lib/api";
+import { createCameraConfig, deleteCameraConfig, getCameraConfigs, updateCameraConfig } from "@/lib/api";
 import type { SurveillanceCameraConfig } from "@/types/camera-config";
 
 type CameraDraft = {
@@ -105,7 +106,13 @@ export default function SurveillanceAdminPanel({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [uploadLocation, setUploadLocation] = useState("");
+  const [uploadMode, setUploadMode] = useState<SurveillanceCameraConfig["system_mode"]>("enforcement_mode");
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
   const refreshCameras = async () => {
@@ -239,6 +246,74 @@ export default function SurveillanceAdminPanel({
     }
   };
 
+  const handleUpload = async () => {
+    if (!selectedUploadFile) {
+      setError("Select a surveillance clip first");
+      return;
+    }
+    if (!uploadLocation.trim()) {
+      setError("Enter a surveillance location");
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      setError(null);
+      const created = await createCameraConfig({
+        file: selectedUploadFile,
+        location: uploadLocation.trim(),
+        system_mode: uploadMode,
+      });
+      const nextCameras = [...cameras, created].sort((left, right) =>
+        left.id.localeCompare(right.id, undefined, { numeric: true }),
+      );
+      setCameras(nextCameras);
+      setDrafts(createDrafts(nextCameras));
+      setSavedId(created.id);
+      setUploadLocation("");
+      setUploadMode("enforcement_mode");
+      setSelectedUploadFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Failed to add surveillance feed",
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleRemove = async (camera: SurveillanceCameraConfig) => {
+    const confirmed = window.confirm(
+      `Remove ${camera.id.toUpperCase()} from the surveillance registry?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setRemovingId(camera.id);
+      setError(null);
+      await deleteCameraConfig(camera.id);
+      const nextCameras = cameras.filter((item) => item.id !== camera.id);
+      setCameras(nextCameras);
+      setDrafts(createDrafts(nextCameras));
+      setSavedId((current) => (current === camera.id ? null : current));
+    } catch (removeError) {
+      setError(
+        removeError instanceof Error
+          ? removeError.message
+          : "Failed to remove surveillance feed",
+      );
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
   return (
     <div className="dash-root admin-root" suppressHydrationWarning>
       <div className="dash-top-bar admin-top-bar">
@@ -322,6 +397,76 @@ export default function SurveillanceAdminPanel({
           </section>
 
           <section className="admin-sidecard card-glass">
+            <p className="admin-kicker">Extend CCTV</p>
+            <div className="admin-upload-card">
+              <h2 className="admin-panel-title admin-panel-title--compact">Add surveillance source</h2>
+              <p className="admin-sidecopy">
+                For the hackathon demo, picking a file here copies it into the Python surveillance folder as the next feed.
+              </p>
+
+              <label className="admin-field">
+                <span className="admin-field-label">Surveillance location</span>
+                <input
+                  value={uploadLocation}
+                  onChange={(event) => setUploadLocation(event.target.value)}
+                  className="admin-input"
+                  placeholder="Lakeside Gate 2"
+                />
+              </label>
+
+              <div className="admin-field">
+                <span className="admin-field-label">Default operating mode</span>
+                <div className="admin-mode-toggle" role="tablist" aria-label="Default mode for new feed">
+                  {MODE_OPTIONS.map((option) => {
+                    const isActive = uploadMode === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`admin-mode-option${isActive ? " admin-mode-option--active" : ""}`}
+                        onClick={() => setUploadMode(option.value)}
+                      >
+                        <span>{option.label}</span>
+                        <small>{option.helper}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv"
+                className="admin-file-input"
+                onChange={(event) => setSelectedUploadFile(event.target.files?.[0] ?? null)}
+              />
+
+              <div className="admin-upload-picker">
+                <button
+                  type="button"
+                  className="admin-action-btn admin-action-btn--ghost"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Choose raw video
+                </button>
+                <span className="admin-upload-file">
+                  {selectedUploadFile?.name || "No file selected"}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                className="admin-action-btn admin-action-btn--primary"
+                onClick={() => void handleUpload()}
+                disabled={isUploading || !selectedUploadFile || !uploadLocation.trim()}
+              >
+                {isUploading ? "Adding feed…" : "Add surveillance feed"}
+              </button>
+            </div>
+          </section>
+
+          <section className="admin-sidecard card-glass">
             <p className="admin-kicker">Mode filter</p>
             <div className="admin-filter-list">
               <button
@@ -390,6 +535,7 @@ export default function SurveillanceAdminPanel({
                   draft.location !== camera.location ||
                   draft.system_mode !== camera.system_mode;
                 const isSaving = savingId === camera.id;
+                const isRemoving = removingId === camera.id;
                 const isSaved = savedId === camera.id && !isDirty;
 
                 return (
@@ -499,15 +645,23 @@ export default function SurveillanceAdminPanel({
                             type="button"
                             className="admin-action-btn admin-action-btn--ghost"
                             onClick={() => handleReset(camera)}
-                            disabled={!isDirty || isSaving}
+                            disabled={!isDirty || isSaving || isRemoving}
                           >
                             Reset
                           </button>
                           <button
                             type="button"
+                            className="admin-action-btn admin-action-btn--danger"
+                            onClick={() => void handleRemove(camera)}
+                            disabled={isSaving || isRemoving}
+                          >
+                            {isRemoving ? "Removing…" : "Remove feed"}
+                          </button>
+                          <button
+                            type="button"
                             className="admin-action-btn admin-action-btn--primary"
                             onClick={() => void handleSave(camera.id)}
-                            disabled={!isDirty || isSaving}
+                            disabled={!isDirty || isSaving || isRemoving}
                           >
                             {isSaving ? "Saving…" : "Save changes"}
                           </button>

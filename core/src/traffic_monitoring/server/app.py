@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 from collections import deque
@@ -14,7 +15,7 @@ from uuid import uuid4
 
 import cv2
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,10 +35,24 @@ def _camera_sort_key(path: Path) -> tuple[int, str]:
     return (int(suffix) if suffix.isdigit() else 10_000, path.stem)
 
 
+_SUPPORTED_SURVEILLANCE_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
+
+
+def _is_supported_surveillance_video(path: Path) -> bool:
+    return path.stem.lower().startswith("nv") and path.suffix.lower() in _SUPPORTED_SURVEILLANCE_EXTENSIONS
+
+
 def _discover_surveillance_videos(root: Path) -> list[Path]:
     surveillance_dir = root / "surveillance"
     surveillance_dir.mkdir(parents=True, exist_ok=True)
-    return sorted(surveillance_dir.glob("nv*.mp4"), key=_camera_sort_key)
+    return sorted(
+        [
+            path
+            for path in surveillance_dir.iterdir()
+            if path.is_file() and _is_supported_surveillance_video(path)
+        ],
+        key=_camera_sort_key,
+    )
 
 
 def _build_camera_registry(root: Path) -> dict[str, dict[str, object]]:
@@ -151,6 +166,28 @@ def _refresh_camera_inventory() -> None:
         camera_id: {**camera, **stored.get(camera_id, {})}
         for camera_id, camera in discovered.items()
     }
+
+
+def _next_camera_id() -> str:
+    discovered = _discover_surveillance_videos(_base_config.root)
+    highest = 0
+    for path in discovered:
+        suffix = path.stem[2:]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return f"nv{highest + 1}"
+
+
+def _surveillance_source_path(camera_id: str) -> Path:
+    camera = cameras.get(camera_id)
+    if camera is None:
+        raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
+    source_path = Path(str(camera["source"]))
+    surveillance_root = (_base_config.root / "surveillance").resolve()
+    source_parent = source_path.parent.resolve(strict=False)
+    if source_parent != surveillance_root and surveillance_root not in source_parent.parents:
+        raise HTTPException(status_code=400, detail="Only surveillance-backed feeds can be managed here")
+    return source_path
 
 
 _refresh_camera_inventory()
@@ -699,6 +736,74 @@ def update_camera_config(camera_id: str, update: CameraConfigUpdate) -> JSONResp
         cameras[camera_id]["source"] = camera["source"]
         cameras[camera_id]["location_link"] = camera["location_link"]
     return JSONResponse(camera)
+
+
+@app.post("/admin/cameras")
+async def create_camera_config(
+    file: UploadFile = File(...),
+    location: str = Form(...),
+    system_mode: Literal["enforcement_mode", "traffic_management_mode"] = Form("enforcement_mode"),
+) -> JSONResponse:
+    location_value = location.strip()
+    if not location_value:
+        raise HTTPException(status_code=400, detail="Location is required")
+
+    suffix = Path(file.filename or "").suffix.lower() or ".mp4"
+    if suffix not in _SUPPORTED_SURVEILLANCE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported video format")
+
+    camera_id = _next_camera_id()
+    destination = _base_config.root / "surveillance" / f"{camera_id}{suffix}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with destination.open("wb") as output_file:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                output_file.write(chunk)
+    except Exception as exc:
+        if destination.exists():
+            destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to store uploaded feed: {exc}") from exc
+    finally:
+        await file.close()
+
+    _refresh_camera_inventory()
+    camera = repository.update_camera_config(
+        camera_id,
+        system_mode=system_mode,
+        location=location_value,
+    )
+    if camera is None:
+        raise HTTPException(status_code=500, detail="Feed was uploaded but registry update failed")
+    if camera_id in cameras:
+        cameras[camera_id]["location"] = camera["location"]
+        cameras[camera_id]["status"] = camera["status"]
+        cameras[camera_id]["system_mode"] = camera["system_mode"]
+        cameras[camera_id]["source"] = camera["source"]
+        cameras[camera_id]["location_link"] = camera["location_link"]
+    return JSONResponse(camera)
+
+
+@app.delete("/admin/cameras/{camera_id}")
+def delete_camera_config(camera_id: str) -> JSONResponse:
+    source_path = _surveillance_source_path(camera_id)
+    source_path.unlink(missing_ok=True)
+
+    processed_preview = _base_config.root / "surveillance" / "output" / f"{camera_id}.mp4"
+    processed_preview.unlink(missing_ok=True)
+
+    stream_output_dir = _base_config.runtime.output_dir / camera_id
+    if stream_output_dir.exists():
+        shutil.rmtree(stream_output_dir, ignore_errors=True)
+
+    _recent_frames_by_camera.pop(camera_id, None)
+    traffic_state_by_camera.pop(camera_id, None)
+    cameras.pop(camera_id, None)
+    _refresh_camera_inventory()
+    return JSONResponse({"deleted": True, "camera_id": camera_id})
 
 
 @app.get("/violations")

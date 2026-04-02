@@ -2,36 +2,51 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import React, { useState, useEffect } from 'react';
-import { ViolationLog } from '@/types/violation';
-import { getViolations, verifyViolation } from '@/lib/api';
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getViolations, verifyViolation } from "@/lib/api";
+import type { ViolationLog } from "@/types/violation";
 
 function isStreamUrl(url: string): boolean {
-  return url.includes('/camera/') && url.endsWith('/stream');
+  return url.includes("/camera/") && url.endsWith("/stream");
 }
 
 function evidenceVideoLabel(violation: ViolationLog): string {
   if (!violation.videoUrl) {
-    return '';
+    return "";
   }
   if (violation.evidenceClipUrl && violation.videoUrl === violation.evidenceClipUrl) {
-    return 'Evidence clip';
+    return "Evidence clip";
   }
   if (isStreamUrl(violation.videoUrl)) {
-    return 'Live processed stream';
+    return "Processed live stream";
   }
-  return 'Source clip';
+  return "Source clip";
 }
 
-const ViolationLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = false }) => {
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  return {
+    time: date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    date: date.toLocaleDateString("en-NP", { day: "numeric", month: "short", year: "numeric" }),
+  };
+}
+
+function MetaItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="border-b border-[var(--gov-line)] py-2 last:border-b-0">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">{label}</div>
+      <div className="mt-1 text-sm text-[var(--gov-ink)]">{value}</div>
+    </div>
+  );
+}
+
+export default function ViolationLogsSection({ canVerify = false }: { canVerify?: boolean }) {
   const [violations, setViolations] = useState<ViolationLog[]>([]);
   const [selected, setSelected] = useState<ViolationLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
-  const selectedScreenshots = selected
-    ? [selected.screenshot1Url, selected.screenshot2Url, selected.screenshot3Url].filter(Boolean)
-    : [];
 
   useEffect(() => {
     async function load() {
@@ -41,256 +56,276 @@ const ViolationLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = f
         const data = await getViolations();
         setViolations(data);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load violations');
+        setError(loadError instanceof Error ? loadError.message : "Failed to load violations");
       } finally {
         setIsLoading(false);
       }
     }
-    load();
+
+    void load();
   }, []);
+
+  const selectedScreenshots = useMemo(
+    () =>
+      selected
+        ? [selected.screenshot1Url, selected.screenshot2Url, selected.screenshot3Url].filter(Boolean)
+        : [],
+    [selected],
+  );
 
   const handleVerify = async (id: string) => {
     try {
       setVerifyingId(id);
       const result = await verifyViolation(id);
-      setViolations((prev) =>
-        prev.map((v) => (v.id === id ? result.violation : v))
-      );
+      setViolations((prev) => prev.map((item) => (item.id === id ? result.violation : item)));
       setSelected((prev) => (prev && prev.id === id ? result.violation : prev));
     } catch (verifyError) {
-      setError(verifyError instanceof Error ? verifyError.message : 'Failed to verify violation');
+      setError(verifyError instanceof Error ? verifyError.message : "Failed to verify violation");
     } finally {
       setVerifyingId(null);
     }
   };
 
   return (
-    <div className="flex-1 flex flex-col items-stretch py-6 px-6 overflow-y-auto relative w-full h-full text-black bg-white rounded-lg shadow-inner">
-        {!selected && (
-          <>
-            <h1 className="text-2xl font-bold mb-6">Violation Logs</h1>
-            {isLoading && <div className="text-sm text-gray-500">Loading violations…</div>}
-            {error && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-            <div className="w-full space-y-4">
-              {violations.map((v) => (
-                <div
-                  key={v.id}
-                  className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm"
+    <section className="flex h-full min-h-[640px] flex-col overflow-hidden border border-[var(--gov-line)] bg-[var(--gov-paper)]">
+      <header className="border-b-4 border-[var(--gov-blue)] bg-[var(--gov-paper-alt)] px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--gov-red)]">
+              Enforcement Register
+            </p>
+            <h1 className="mt-1 text-xl font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">
+              Violation Logs
+            </h1>
+          </div>
+          <div className="inline-flex items-center gap-2 border border-[var(--gov-line)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
+            <span>{violations.length}</span>
+            <span>Records</span>
+          </div>
+        </div>
+      </header>
+
+      {error ? (
+        <div className="border-b border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-4 py-2 text-sm text-[var(--gov-red-dark)]">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.9fr)]">
+        <div className="gov-scrollbar min-h-0 overflow-auto border-r border-[var(--gov-line)]">
+          <div className="hidden grid-cols-[120px_minmax(0,1fr)_130px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)] md:grid">
+            <span>Plate</span>
+            <span>Case Summary</span>
+            <span>Status</span>
+            <span>Time</span>
+          </div>
+
+          {isLoading ? (
+            <div className="px-4 py-8 text-sm text-[var(--gov-muted)]">Loading violation records...</div>
+          ) : null}
+
+          {!isLoading && violations.length === 0 ? (
+            <div className="px-4 py-8 text-sm text-[var(--gov-muted)]">No violation records available.</div>
+          ) : null}
+
+          <div className="divide-y divide-[var(--gov-line)]">
+            {violations.map((violation) => {
+              const stamp = formatTimestamp(violation.timestamp);
+              const isSelected = selected?.id === violation.id;
+              return (
+                <button
+                  key={violation.id}
+                  type="button"
+                  onClick={() => setSelected(violation)}
+                  className={`grid w-full gap-3 px-4 py-3 text-left transition hover:bg-[var(--gov-highlight)] md:grid-cols-[120px_minmax(0,1fr)_130px_120px] ${
+                    isSelected ? "bg-[var(--gov-highlight)]" : "bg-white"
+                  }`}
                 >
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-xl font-bold text-blue-600">
-                      {v.driverName[0]}
+                  <div>
+                    <div className="inline-flex border border-[var(--gov-red)] bg-[rgba(193,39,45,0.1)] px-2 py-1 font-mono text-xs font-bold tracking-[0.2em] text-[var(--gov-red-dark)]">
+                      {violation.licensePlate}
                     </div>
-                    <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline space-x-3">
-                        <h3 className="text-lg font-semibold text-gray-900 truncate">{v.ownerName || v.driverName}</h3>
-                      </div>
-                      <div className="mt-1 mb-2">
-                        <span className="inline-block px-3 py-1 bg-red-300 text-white font-mono text-xs font-bold tracking-widest rounded-md border-b-2 border-r-2 border-red-500 shadow-sm">
-                          {v.licensePlate}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {v.locationLink ? (
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[var(--gov-ink)]">
+                      {violation.ownerName || violation.driverName}
+                    </div>
+                    <div className="mt-1 truncate text-sm text-[var(--gov-muted)]">{violation.title}</div>
+                    <div className="mt-1 truncate text-xs text-[var(--gov-muted)]">
+                      {violation.cameraId?.toUpperCase() || "CAM"} | {violation.cameraLocation || violation.tempAddress}
+                    </div>
+                  </div>
+                  <div className="flex items-start">
+                    <span
+                      className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                        violation.verified
+                          ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                          : "border-[var(--gov-blue)] bg-[rgba(0,56,147,0.08)] text-[var(--gov-blue)]"
+                      }`}
+                    >
+                      {violation.verified ? "Verified" : "Pending"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-[var(--gov-muted)]">
+                    <div>{stamp.time}</div>
+                    <div className="mt-1">{stamp.date}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="gov-scrollbar min-h-0 overflow-auto bg-[var(--gov-paper-alt)]">
+          {selected ? (
+            <div className="px-4 py-4 sm:px-5">
+              <div className="flex items-start justify-between gap-3 border-b border-[var(--gov-line-strong)] pb-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-red)]">
+                    Case File
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">
+                    {selected.title}
+                  </h2>
+                  <div className="mt-2 inline-flex border border-[var(--gov-red)] bg-[rgba(193,39,45,0.1)] px-2 py-1 font-mono text-xs font-bold tracking-[0.22em] text-[var(--gov-red-dark)]">
+                    {selected.licensePlate}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                  onClick={() => setSelected(null)}
+                >
+                  Close
+                </button>
+              </div>
+
+              {selected.isMockData ? (
+                <div className="mt-4 border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Demo data only. This record is not from a live DoTM system.
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+                <div className="space-y-4">
+                  {selectedScreenshots.length > 0 ? (
+                    <div className={`grid gap-2 ${selectedScreenshots.length === 1 ? "grid-cols-1" : "grid-cols-3"}`}>
+                      {selectedScreenshots.map((screenshot, index) => (
+                        <img
+                          key={screenshot}
+                          src={screenshot}
+                          alt={`Evidence screenshot ${index + 1}`}
+                          className="h-28 w-full border border-[var(--gov-line)] object-cover"
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {selected.videoUrl ? (
+                    <div className="border border-[var(--gov-line)] bg-black">
+                      <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.16)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80">
+                        <span>{evidenceVideoLabel(selected) || "Evidence"}</span>
+                        {selected.sourceVideoUrl && selected.videoUrl !== selected.sourceVideoUrl ? (
                           <a
-                            href={v.locationLink}
+                            href={selected.sourceVideoUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="underline"
+                            className="text-white underline underline-offset-4"
                           >
-                            {v.tempAddress}
+                            Open source clip
                           </a>
-                        ) : (
-                          <span>{v.tempAddress}</span>
-                        )}
+                        ) : null}
                       </div>
-                      <div className="text-sm font-medium mt-1">{v.title}</div>
-                      <div className="text-xs text-gray-400">
-                        {new Date(v.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}{' '}
-                        | {new Date(v.timestamp).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </div>
+                      {isStreamUrl(selected.videoUrl) ? (
+                        <img src={selected.videoUrl} alt={selected.title} className="w-full" />
+                      ) : (
+                        <video controls className="w-full">
+                          <source src={selected.videoUrl} type="video/mp4" />
+                        </video>
+                      )}
                     </div>
+                  ) : null}
+
+                  <div className="border border-[var(--gov-line)] bg-white px-4 py-3 text-sm leading-6 text-[var(--gov-ink)]">
+                    {selected.description}
                   </div>
-                  <button
-                    className="ml-4 px-4 py-2 border rounded text-sm font-medium bg-blue-50 hover:bg-blue-100"
-                    onClick={() => setSelected(v)}
-                  >
-                    more detail
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        {selected && (
-          <div className="absolute inset-0 z-10 bg-white flex flex-col overflow-y-auto">
-            <div className="flex justify-between items-center px-6 py-4 border-b">
-              <div>
-                <div className="text-lg font-semibold">{selected.title}</div>
-                <div className="mt-2 mb-2">
-                  <span className="inline-block px-3 py-1 bg-yellow-300 text-gray-900 font-mono text-sm font-bold tracking-widest rounded-md border-b-2 border-r-2 border-yellow-500 shadow-sm rotate-[1deg]">
-                    {selected.licensePlate}
-                  </span>
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  {new Date(selected.timestamp).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}{' '}
-                  | {new Date(selected.timestamp).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </div>
-              </div>
-              <button
-                className="text-gray-500 border px-3 py-1 rounded hover:bg-gray-100"
-                onClick={() => setSelected(null)}
-              >
-                close
-              </button>
-            </div>
-            <div className="p-6 flex-1 overflow-y-auto">
-              <div className="flex items-center space-x-4 mb-4">
-                <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-blue-600">
-                  {selected.driverName[0]}
-                </div>
-                <div>
-                  <div className="font-semibold">{selected.ownerName || selected.driverName}</div>
-                  <div className="text-xs text-gray-500">{selected.licensePlate}</div>
-                  <div className="mt-1 text-xs text-gray-500">
-                    {[selected.cameraId?.toUpperCase(), selected.cameraLocation || selected.tempAddress]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </div>
-                </div>
-              </div>
-              {selected.isMockData && (
-                <div className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Demo data — not real DoTM records
-                </div>
-              )}
-              <div className="mb-4 grid gap-3 rounded border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 md:grid-cols-2">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Camera</div>
-                  <div>{selected.cameraId?.toUpperCase() || 'Unknown feed'}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Location</div>
-                  {selected.cameraLocationLink ? (
-                    <a
-                      href={selected.cameraLocationLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 underline"
-                    >
-                      {selected.cameraLocation || selected.tempAddress}
-                    </a>
-                  ) : (
-                    <div>{selected.cameraLocation || selected.tempAddress}</div>
-                  )}
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Owner Address</div>
-                  <div>{selected.ownerAddress || selected.tempAddress}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Evidence Source</div>
-                  <div className="capitalize">{selected.evidenceProvider || 'local'}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Playback</div>
-                  <div>{evidenceVideoLabel(selected) || 'Unavailable'}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Vehicle Color</div>
-                  <div>{selected.vehicleColor || 'Unknown'}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Registration Date</div>
-                  <div>{selected.registrationDate || 'Unknown'}</div>
-                </div>
-              </div>
-              {selectedScreenshots.length > 0 && (
-                <div className={`grid gap-2 mb-4 ${selectedScreenshots.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
-                  {selectedScreenshots.map((screenshot, index) => (
-                    <img
-                      key={screenshot}
-                      src={screenshot}
-                      alt={`Screenshot ${index + 1}`}
-                      className="rounded border object-cover h-24 w-full"
-                    />
-                  ))}
-                </div>
-              )}
-              {selected.videoUrl && (
-                <div className="mb-4">
-                  <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    <span>{evidenceVideoLabel(selected)}</span>
-                    {selected.sourceVideoUrl && selected.videoUrl !== selected.sourceVideoUrl && (
+
+                  <div className="flex flex-wrap gap-2">
+                    {selected.locationLink ? (
                       <a
-                        href={selected.sourceVideoUrl}
+                        href={selected.locationLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-blue-600 underline normal-case tracking-normal"
+                        className="border border-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-blue)] hover:bg-[rgba(0,56,147,0.06)]"
                       >
-                        Open source clip
+                        Open map
                       </a>
-                    )}
+                    ) : null}
+                    {!selected.verified && canVerify ? (
+                      <button
+                        type="button"
+                        className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
+                        disabled={verifyingId === selected.id}
+                        onClick={() => void handleVerify(selected.id)}
+                      >
+                        {verifyingId === selected.id ? "Verifying..." : "Verify and Generate Challan"}
+                      </button>
+                    ) : null}
+                    {!selected.verified && !canVerify ? (
+                      <span className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
+                        Read only
+                      </span>
+                    ) : null}
+                    {selected.verified ? (
+                      <span className="border border-emerald-700 bg-emerald-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">
+                        Verified
+                      </span>
+                    ) : null}
                   </div>
-                  {isStreamUrl(selected.videoUrl) ? (
-                    <div className="overflow-hidden rounded border bg-black">
-                      <img
-                        src={selected.videoUrl}
-                        alt={`Live stream for ${selected.title}`}
-                        className="w-full"
-                      />
-                    </div>
-                  ) : (
-                    <video controls className="w-full rounded border">
-                      <source src={selected.videoUrl} type="video/mp4" />
-                      Your browser does not support the video tag.
-                    </video>
-                  )}
                 </div>
-              )}
-              <div className="mb-4 text-gray-700">{selected.description}</div>
-              <div className="flex items-center space-x-4">
-                {selected.locationLink ? (
-                  <a
-                    href={selected.locationLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 underline"
-                  >
-                    View on Map
-                  </a>
-                ) : null}
-                {!selected.verified && canVerify && (
-                  <button
-                    className="px-4 py-2 bg-[#3B82F6] text-white rounded font-medium hover:bg-blue-700"
-                    disabled={verifyingId === selected.id}
-                    onClick={() => handleVerify(selected.id)}
-                  >
-                    {verifyingId === selected.id ? 'Verifying…' : 'Verify & Generate Challan'}
-                  </button>
-                )}
-                {!selected.verified && !canVerify && (
-                  <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded text-sm font-medium">
-                    Read-only access
-                  </span>
-                )}
-                {selected.verified && (
-                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm font-medium">
-                    Verified & Challan Issued
-                  </span>
-                )}
+
+                <aside className="border border-[var(--gov-line)] bg-white px-4 py-3">
+                  <div className="border-b border-[var(--gov-line)] pb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-blue)]">
+                    Registry Metadata
+                  </div>
+                  <div className="mt-2">
+                    <MetaItem label="Owner" value={selected.ownerName || selected.driverName} />
+                    <MetaItem label="Camera" value={selected.cameraId?.toUpperCase() || "Unknown feed"} />
+                    <MetaItem
+                      label="Location"
+                      value={
+                        selected.cameraLocationLink ? (
+                          <a
+                            href={selected.cameraLocationLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[var(--gov-blue)] underline underline-offset-4"
+                          >
+                            {selected.cameraLocation || selected.tempAddress}
+                          </a>
+                        ) : (
+                          selected.cameraLocation || selected.tempAddress
+                        )
+                      }
+                    />
+                    <MetaItem label="Owner Address" value={selected.ownerAddress || selected.tempAddress} />
+                    <MetaItem label="Vehicle Color" value={selected.vehicleColor || "Unknown"} />
+                    <MetaItem label="Registration Date" value={selected.registrationDate || "Unknown"} />
+                    <MetaItem label="Evidence Source" value={selected.evidenceProvider || "local"} />
+                    <MetaItem label="Playback" value={evidenceVideoLabel(selected) || "Unavailable"} />
+                  </div>
+                </aside>
               </div>
             </div>
-          </div>
-        )}
-    </div>
+          ) : (
+            <div className="px-4 py-8 sm:px-5">
+              <div className="border border-dashed border-[var(--gov-line-strong)] bg-white px-4 py-6 text-sm text-[var(--gov-muted)]">
+                Select a violation record from the register to inspect evidence, location, and verification status.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
-};
-
-export default ViolationLogsSection;
+}

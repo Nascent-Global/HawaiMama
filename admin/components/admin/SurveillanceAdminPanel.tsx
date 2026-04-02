@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   createAdminAccount,
@@ -334,6 +335,94 @@ function RefreshIcon() {
   );
 }
 
+function SectionFrame({
+  kicker,
+  title,
+  actions,
+  children,
+}: {
+  kicker: string;
+  title: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="border border-[var(--gov-line)] bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-red)]">{kicker}</div>
+          <h2 className="mt-1 text-lg font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">{title}</h2>
+        </div>
+        {actions}
+      </div>
+      <div className="px-4 py-4">{children}</div>
+    </section>
+  );
+}
+
+function StatCell({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">{label}</div>
+      <div className="mt-2 text-2xl font-bold text-[var(--gov-ink)]">{value}</div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  wide = false,
+}: {
+  label: string;
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <label className={`grid gap-2 ${wide ? "md:col-span-2" : ""}`}>
+      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function textInputClass() {
+  return "w-full border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-sm text-[var(--gov-ink)] outline-none placeholder:text-[var(--gov-muted)] focus:border-[var(--gov-blue)]";
+}
+
+function checkboxClass() {
+  return "h-4 w-4 rounded-none border-[var(--gov-line-strong)] text-[var(--gov-blue)] focus:ring-[var(--gov-blue)]";
+}
+
+function ModeButtons({
+  value,
+  onChange,
+}: {
+  value: SurveillanceCameraConfig["system_mode"];
+  onChange: (value: SurveillanceCameraConfig["system_mode"]) => void;
+}) {
+  return (
+    <div className="grid gap-2 md:grid-cols-2">
+      {MODE_OPTIONS.map((option) => {
+        const active = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            className={`border px-3 py-3 text-left ${
+              active ? "border-[var(--gov-blue)] bg-[var(--gov-highlight)]" : "border-[var(--gov-line)] bg-white"
+            }`}
+            onClick={() => onChange(option.value)}
+          >
+            <div className="text-sm font-semibold text-[var(--gov-ink)]">{option.label}</div>
+            <div className="mt-1 text-xs text-[var(--gov-muted)]">{option.helper}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function SurveillanceAdminPanel() {
   const { admin, logout } = useAdminSession();
   const canManageAdmins = canAccessPermission(admin, "can_manage_admins");
@@ -357,6 +446,8 @@ export default function SurveillanceAdminPanel() {
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [savingAdminId, setSavingAdminId] = useState<string | null>(null);
   const [creatingAdmin, setCreatingAdmin] = useState(false);
+  const [expandedCameraId, setExpandedCameraId] = useState<string | null>(null);
+  const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
   const [newAdmin, setNewAdmin] = useState<{
     username: string;
     full_name: string;
@@ -453,6 +544,8 @@ export default function SurveillanceAdminPanel() {
     () => cameras.filter((camera) => camera.system_mode === "traffic_management_mode").length,
     [cameras],
   );
+
+  const activeFeedCount = useMemo(() => cameras.filter((camera) => camera.status === "active").length, [cameras]);
 
   const handleDraftChange = <K extends keyof CameraDraft>(cameraId: string, field: K, value: CameraDraft[K]) => {
     setSavedId((current) => (current === cameraId ? null : current));
@@ -660,54 +753,55 @@ export default function SurveillanceAdminPanel() {
   };
 
   return (
-    <div className="dash-root admin-root" suppressHydrationWarning>
-      <div className="dash-top-bar admin-top-bar">
-        <header className="logo-strip" role="banner">
-          <div className="logo-strip-inner">
-            <div className="logo-strip-brand">
-              <Image
-                src="/logo.png"
-                alt="Hawai Mama — smart traffic monitoring"
-                width={200}
-                height={56}
-                className="logo-strip-img"
-                priority
-                sizes="(max-width: 400px) 160px, 200px"
+    <div className="grid min-h-[calc(100dvh-32px)] grid-rows-[auto_1fr] overflow-hidden border border-[var(--gov-line-strong)] bg-[var(--gov-paper)] shadow-[0_20px_45px_rgba(18,35,61,0.08)]" suppressHydrationWarning>
+      <header className="border-b border-[var(--gov-line-strong)] bg-[var(--gov-paper-alt)]">
+        <div className="h-2 w-full bg-[linear-gradient(90deg,#c1272d_0%,#c1272d_20%,#003893_20%,#003893_100%)]" />
+        <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-5">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center border border-[var(--gov-line)] bg-white p-2">
+              <Image src="/logo.png" alt="Hawai Mama" width={44} height={44} className="h-auto w-auto max-h-10 max-w-10 object-contain" priority />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--gov-red)]">Configuration Registry</p>
+              <h1 className="mt-1 text-xl font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">Feed and Access Administration</h1>
+              <p className="mt-1 text-sm text-[var(--gov-muted)]">
+                Government-style operational console for surveillance sources, runtime settings, and office permissions.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="relative">
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search feeds, files, locations..."
+                className={`${textInputClass()} min-w-[280px] pl-3 pr-10`}
               />
-              <p className="logo-strip-tagline">Surveillance feed control and office access management</p>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--gov-muted)]">
+                <SearchIcon />
+              </span>
             </div>
-          </div>
-        </header>
-
-        <div className="dash-toolbar dash-toolbar--inline admin-toolbar">
-          <div className="dash-search-wrap admin-search-wrap">
-            <input
-              type="search"
-              className="dash-search"
-              placeholder="Search by feed id, filename, or location…"
-              aria-label="Search surveillance feeds"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-            <SearchIcon />
-          </div>
-
-          {admin ? (
-            <div className="dash-session-pill">
-              <div>
-                <div className="dash-session-name">{admin.full_name}</div>
-                <div className="dash-session-role">{admin.role === "superadmin" ? "Superadmin" : "Admin"}</div>
+            {admin ? (
+              <div className="flex items-center gap-3 border border-[var(--gov-line)] bg-white px-3 py-2">
+                <div className="text-right">
+                  <div className="text-sm font-semibold text-[var(--gov-ink)]">{admin.full_name}</div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--gov-muted)]">
+                    {admin.role === "superadmin" ? "Superadmin" : "Admin"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="border border-[var(--gov-line-strong)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-red)] hover:text-[var(--gov-red-dark)]"
+                  onClick={() => void logout()}
+                >
+                  Logout
+                </button>
               </div>
-              <button type="button" className="dash-session-logout" onClick={() => void logout()}>
-                Logout
-              </button>
-            </div>
-          ) : null}
-
-          <div className="admin-toolbar-actions">
+            ) : null}
             <button
               type="button"
-              className="admin-toolbar-btn admin-toolbar-btn--subtle"
+              className="inline-flex items-center gap-2 border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
               onClick={() => {
                 void refreshCameras();
                 void refreshAccounts();
@@ -715,185 +809,132 @@ export default function SurveillanceAdminPanel() {
               disabled={isRefreshing || accountsLoading}
             >
               <RefreshIcon />
-              <span>{isRefreshing || accountsLoading ? "Refreshing…" : "Refresh data"}</span>
+              <span>{isRefreshing || accountsLoading ? "Refreshing..." : "Refresh"}</span>
             </button>
-            <Link href="/" className="admin-toolbar-btn admin-toolbar-btn--primary">
-              Back to dashboard
+            <Link
+              href="/"
+              className="border border-[var(--gov-blue)] bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)]"
+            >
+              Dashboard
             </Link>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="dash-body admin-body">
-        <aside className="dash-sidebar admin-sidebar" aria-label="Feed admin overview">
-          <section className="admin-sidecard card-glass">
-            <p className="admin-kicker">Control Room</p>
-            <h1 className="admin-panel-title">Feed configuration</h1>
-            <p className="admin-sidecopy">
-              Every card below is backed by the Python camera registry. Office admins can rename feeds and switch runtime mode without editing backend code.
-            </p>
-            <div className="admin-stat-grid">
-              <div className="admin-stat-card">
-                <span className="admin-stat-value">{cameras.length}</span>
-                <span className="admin-stat-label">Total feeds</span>
-              </div>
-              <div className="admin-stat-card">
-                <span className="admin-stat-value">{enforcementCount}</span>
-                <span className="admin-stat-label">Enforcement</span>
-              </div>
-              <div className="admin-stat-card">
-                <span className="admin-stat-value">{trafficCount}</span>
-                <span className="admin-stat-label">Traffic ops</span>
-              </div>
-              <div className="admin-stat-card">
-                <span className="admin-stat-value">{dirtyCount}</span>
-                <span className="admin-stat-label">Unsaved</span>
-              </div>
-            </div>
-          </section>
+      <div className="gov-scrollbar min-h-0 overflow-auto px-4 py-4 sm:px-5">
+        <div className="grid gap-3 md:grid-cols-5">
+          <StatCell label="Total feeds" value={cameras.length} />
+          <StatCell label="Active feeds" value={activeFeedCount} />
+          <StatCell label="Enforcement" value={enforcementCount} />
+          <StatCell label="Traffic mode" value={trafficCount} />
+          <StatCell label="Unsaved drafts" value={dirtyCount} />
+        </div>
 
-          <section className="admin-sidecard card-glass">
-            <p className="admin-kicker">Extend CCTV</p>
-            <div className="admin-upload-card">
-              <h2 className="admin-panel-title admin-panel-title--compact">Add surveillance source</h2>
-              <p className="admin-sidecopy">
-                For the hackathon demo, picking a file here copies it into the Python surveillance folder as the next feed.
-              </p>
+        {error ? (
+          <div className="mt-4 border border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-4 py-3 text-sm text-[var(--gov-red-dark)]">{error}</div>
+        ) : null}
+        {accountsError ? (
+          <div className="mt-4 border border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-4 py-3 text-sm text-[var(--gov-red-dark)]">{accountsError}</div>
+        ) : null}
 
-              <label className="admin-field">
-                <span className="admin-field-label">Surveillance location</span>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <SectionFrame kicker="New Source" title="Add Surveillance Feed">
+              <div className="grid gap-4">
+                <Field label="Surveillance location">
+                  <input
+                    value={uploadLocation}
+                    onChange={(event) => setUploadLocation(event.target.value)}
+                    className={textInputClass()}
+                    placeholder="Lakeside Gate 2"
+                  />
+                </Field>
+                <Field label="Default mode">
+                  <ModeButtons value={uploadMode} onChange={setUploadMode} />
+                </Field>
                 <input
-                  value={uploadLocation}
-                  onChange={(event) => setUploadLocation(event.target.value)}
-                  className="admin-input"
-                  placeholder="Lakeside Gate 2"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv"
+                  className="hidden"
+                  onChange={(event) => setSelectedUploadFile(event.target.files?.[0] ?? null)}
                 />
-              </label>
-
-              <div className="admin-field">
-                <span className="admin-field-label">Default operating mode</span>
-                <div className="admin-mode-toggle" role="tablist" aria-label="Default mode for new feed">
-                  {MODE_OPTIONS.map((option) => {
-                    const isActive = uploadMode === option.value;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`admin-mode-option${isActive ? " admin-mode-option--active" : ""}`}
-                        onClick={() => setUploadMode(option.value)}
-                      >
-                        <span>{option.label}</span>
-                        <small>{option.helper}</small>
-                      </button>
-                    );
-                  })}
+                <div className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-3 py-3 text-sm text-[var(--gov-muted)]">
+                  <div>{selectedUploadFile?.name || "No video file selected"}</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Choose video
+                  </button>
+                  <button
+                    type="button"
+                    className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
+                    onClick={() => void handleUpload()}
+                    disabled={isUploading || !selectedUploadFile || !uploadLocation.trim()}
+                  >
+                    {isUploading ? "Adding..." : "Add feed"}
+                  </button>
                 </div>
               </div>
+            </SectionFrame>
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv"
-                className="admin-file-input"
-                onChange={(event) => setSelectedUploadFile(event.target.files?.[0] ?? null)}
-              />
-
-              <div className="admin-upload-picker">
-                <button
-                  type="button"
-                  className="admin-action-btn admin-action-btn--ghost"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Choose raw video
-                </button>
-                <span className="admin-upload-file">{selectedUploadFile?.name || "No file selected"}</span>
+            <SectionFrame kicker="Feed Scope" title="Registry Filter">
+              <div className="grid gap-2">
+                {(["all", "enforcement_mode", "traffic_management_mode"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`border px-3 py-3 text-left text-sm font-semibold uppercase tracking-[0.1em] ${
+                      modeFilter === value
+                        ? "border-[var(--gov-blue)] bg-[var(--gov-highlight)] text-[var(--gov-blue)]"
+                        : "border-[var(--gov-line)] bg-white text-[var(--gov-muted)]"
+                    }`}
+                    onClick={() => setModeFilter(value)}
+                  >
+                    {value === "all" ? "All feeds" : value === "enforcement_mode" ? "Enforcement mode" : "Traffic mode"}
+                  </button>
+                ))}
               </div>
+            </SectionFrame>
+          </div>
 
-              <button
-                type="button"
-                className="admin-action-btn admin-action-btn--primary"
-                onClick={() => void handleUpload()}
-                disabled={isUploading || !selectedUploadFile || !uploadLocation.trim()}
-              >
-                {isUploading ? "Adding feed…" : "Add surveillance feed"}
-              </button>
-            </div>
-          </section>
-
-          <section className="admin-sidecard card-glass">
-            <p className="admin-kicker">Mode filter</p>
-            <div className="admin-filter-list">
-              <button
-                type="button"
-                className={`admin-filter-btn${modeFilter === "all" ? " admin-filter-btn--active" : ""}`}
-                onClick={() => setModeFilter("all")}
-              >
-                All feeds
-              </button>
-              <button
-                type="button"
-                className={`admin-filter-btn${modeFilter === "enforcement_mode" ? " admin-filter-btn--active" : ""}`}
-                onClick={() => setModeFilter("enforcement_mode")}
-              >
-                Enforcement
-              </button>
-              <button
-                type="button"
-                className={`admin-filter-btn${modeFilter === "traffic_management_mode" ? " admin-filter-btn--active" : ""}`}
-                onClick={() => setModeFilter("traffic_management_mode")}
-              >
-                Traffic light
-              </button>
-            </div>
-          </section>
-        </aside>
-
-        <div className="dash-main admin-main">
-          {error ? <div className="admin-alert admin-alert--error">{error}</div> : null}
-          {accountsError ? <div className="admin-alert admin-alert--error">{accountsError}</div> : null}
-
-          {canManageAdmins ? (
-            <section className="mb-6 rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-sm">
-              <div className="mb-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Office access control</p>
-                <h2 className="mt-2 text-2xl font-semibold text-slate-900">Create and scope admin accounts</h2>
-                <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                  Superadmins can decide which offices see which surveillance locations and which actions they can perform.
-                </p>
-              </div>
-
-              <div className="grid gap-6 lg:grid-cols-[1.1fr_1.4fr]">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
-                  <h3 className="text-lg font-semibold text-slate-900">Add office admin</h3>
-                  <div className="mt-4 grid gap-4">
-                    <label className="auth-field">
-                      <span>Username</span>
-                      <input
-                        value={newAdmin.username}
-                        onChange={(event) => setNewAdmin((current) => ({ ...current, username: event.target.value }))}
-                        placeholder="ward7_admin"
-                      />
-                    </label>
-                    <label className="auth-field">
-                      <span>Full name</span>
-                      <input
-                        value={newAdmin.full_name}
-                        onChange={(event) => setNewAdmin((current) => ({ ...current, full_name: event.target.value }))}
-                        placeholder="Ward 7 Operations Desk"
-                      />
-                    </label>
-                    <label className="auth-field">
-                      <span>Temporary password</span>
-                      <input
-                        type="password"
-                        value={newAdmin.password}
-                        onChange={(event) => setNewAdmin((current) => ({ ...current, password: event.target.value }))}
-                        placeholder="Create a password"
-                      />
-                    </label>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="auth-field">
-                        <span>Role</span>
+          <div className="space-y-4">
+            {canManageAdmins ? (
+              <SectionFrame kicker="Office Access" title="Admin Accounts">
+                <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+                  <div className="space-y-4 border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
+                    <div className="text-sm font-semibold text-[var(--gov-ink)]">Create office admin</div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+                      <Field label="Username">
+                        <input
+                          value={newAdmin.username}
+                          onChange={(event) => setNewAdmin((current) => ({ ...current, username: event.target.value }))}
+                          placeholder="ward7_admin"
+                          className={textInputClass()}
+                        />
+                      </Field>
+                      <Field label="Full name">
+                        <input
+                          value={newAdmin.full_name}
+                          onChange={(event) => setNewAdmin((current) => ({ ...current, full_name: event.target.value }))}
+                          placeholder="Ward 7 Operations Desk"
+                          className={textInputClass()}
+                        />
+                      </Field>
+                      <Field label="Temporary password">
+                        <input
+                          type="password"
+                          value={newAdmin.password}
+                          onChange={(event) => setNewAdmin((current) => ({ ...current, password: event.target.value }))}
+                          placeholder="Create a password"
+                          className={textInputClass()}
+                        />
+                      </Field>
+                      <Field label="Role">
                         <select
                           value={newAdmin.role}
                           onChange={(event) => {
@@ -906,24 +947,27 @@ export default function SurveillanceAdminPanel() {
                               permissions: role === "superadmin" ? superadminPermissions() : current.permissions,
                             }));
                           }}
+                          className={textInputClass()}
                         >
                           <option value="admin">Admin</option>
                           <option value="superadmin">Superadmin</option>
                         </select>
-                      </label>
-                      <label className="auth-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={newAdmin.is_active}
-                          onChange={(event) => setNewAdmin((current) => ({ ...current, is_active: event.target.checked }))}
-                        />
-                        <span>Account is active</span>
-                      </label>
+                      </Field>
                     </div>
 
-                    <label className="auth-checkbox">
+                    <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
                       <input
                         type="checkbox"
+                        className={checkboxClass()}
+                        checked={newAdmin.is_active}
+                        onChange={(event) => setNewAdmin((current) => ({ ...current, is_active: event.target.checked }))}
+                      />
+                      <span>Account is active</span>
+                    </label>
+                    <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
+                      <input
+                        type="checkbox"
+                        className={checkboxClass()}
                         checked={newAdmin.role === "superadmin" || newAdmin.all_locations}
                         disabled={newAdmin.role === "superadmin"}
                         onChange={(event) => setNewAdmin((current) => ({ ...current, all_locations: event.target.checked }))}
@@ -933,12 +977,13 @@ export default function SurveillanceAdminPanel() {
 
                     {newAdmin.role !== "superadmin" && !newAdmin.all_locations ? (
                       <div>
-                        <div className="mb-2 text-sm font-medium text-slate-700">Allowed locations</div>
+                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Allowed locations</div>
                         <div className="grid gap-2 sm:grid-cols-2">
                           {uniqueLocations.map((location) => (
-                            <label key={location} className="auth-checkbox">
+                            <label key={location} className="flex items-center gap-3 border border-[var(--gov-line)] bg-white px-3 py-2 text-sm text-[var(--gov-ink)]">
                               <input
                                 type="checkbox"
+                                className={checkboxClass()}
                                 checked={newAdmin.allowed_locations.includes(location)}
                                 onChange={() =>
                                   setNewAdmin((current) => ({
@@ -957,27 +1002,25 @@ export default function SurveillanceAdminPanel() {
                     ) : null}
 
                     <div>
-                      <div className="mb-2 text-sm font-medium text-slate-700">Permissions</div>
+                      <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Permissions</div>
                       <div className="grid gap-2">
                         {PERMISSION_META.map((permission) => (
-                          <label key={permission.key} className="auth-checkbox auth-checkbox--stacked">
+                          <label key={permission.key} className="flex gap-3 border border-[var(--gov-line)] bg-white px-3 py-3 text-sm text-[var(--gov-ink)]">
                             <input
                               type="checkbox"
+                              className={`${checkboxClass()} mt-0.5`}
                               checked={newAdmin.role === "superadmin" || newAdmin.permissions[permission.key]}
                               disabled={newAdmin.role === "superadmin"}
                               onChange={(event) =>
                                 setNewAdmin((current) => ({
                                   ...current,
-                                  permissions: {
-                                    ...current.permissions,
-                                    [permission.key]: event.target.checked,
-                                  },
+                                  permissions: { ...current.permissions, [permission.key]: event.target.checked },
                                 }))
                               }
                             />
                             <span>
-                              <strong>{permission.label}</strong>
-                              <small>{permission.helper}</small>
+                              <strong className="block">{permission.label}</strong>
+                              <span className="mt-1 block text-xs text-[var(--gov-muted)]">{permission.helper}</span>
                             </span>
                           </label>
                         ))}
@@ -986,616 +1029,420 @@ export default function SurveillanceAdminPanel() {
 
                     <button
                       type="button"
-                      className="admin-action-btn admin-action-btn--primary"
+                      className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
                       disabled={!newAdmin.username.trim() || !newAdmin.full_name.trim() || !newAdmin.password || creatingAdmin}
                       onClick={() => void handleCreateAdmin()}
                     >
-                      {creatingAdmin ? "Creating admin…" : "Create admin"}
+                      {creatingAdmin ? "Creating..." : "Create admin"}
                     </button>
                   </div>
-                </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-slate-900">Existing office accounts</h3>
-                    <span className="text-sm text-slate-500">{accounts.length} accounts</span>
-                  </div>
-                  {accountsLoading ? <p className="text-sm text-slate-500">Loading admin accounts…</p> : null}
-                  <div className="space-y-4">
-                    {accounts.map((account) => {
-                      const draft = accountDrafts[account.id] ?? createAdminDrafts([account])[account.id];
-                      return (
-                        <article key={account.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <h4 className="text-base font-semibold text-slate-900">{account.username}</h4>
-                              <p className="text-sm text-slate-500">{account.role === "superadmin" ? "Superadmin" : "Office admin"}</p>
+                  <div className="min-h-[240px] border border-[var(--gov-line)] bg-white">
+                    <div className="grid grid-cols-[minmax(0,1fr)_120px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">
+                      <span>Account</span>
+                      <span>Status</span>
+                      <span>Actions</span>
+                    </div>
+                    {accountsLoading ? <div className="px-4 py-6 text-sm text-[var(--gov-muted)]">Loading admin accounts...</div> : null}
+                    <div className="divide-y divide-[var(--gov-line)]">
+                      {accounts.map((account) => {
+                        const draft = accountDrafts[account.id] ?? createAdminDrafts([account])[account.id];
+                        const expanded = expandedAccountId === account.id;
+                        return (
+                          <div key={account.id}>
+                            <div className="grid items-center gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_120px_120px]">
+                              <div>
+                                <div className="text-sm font-semibold text-[var(--gov-ink)]">{account.username}</div>
+                                <div className="mt-1 text-xs text-[var(--gov-muted)]">
+                                  {draft.full_name} | {account.role === "superadmin" ? "Superadmin" : "Office admin"}
+                                </div>
+                              </div>
+                              <div>
+                                <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                                  draft.is_active
+                                    ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                                    : "border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] text-[var(--gov-red-dark)]"
+                                }`}>
+                                  {draft.is_active ? "Active" : "Disabled"}
+                                </span>
+                              </div>
+                              <div className="flex justify-start md:justify-end">
+                                <button
+                                  type="button"
+                                  className="border border-[var(--gov-line-strong)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                                  onClick={() => setExpandedAccountId(expanded ? null : account.id)}
+                                >
+                                  {expanded ? "Hide" : "Manage"}
+                                </button>
+                              </div>
                             </div>
-                            <span className={`admin-state-pill ${draft.is_active ? "admin-state-pill--saved" : "admin-state-pill--dirty"}`}>
-                              {draft.is_active ? "Active" : "Disabled"}
-                            </span>
-                          </div>
+                            {expanded ? (
+                              <div className="border-t border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
+                                <div className="grid gap-4 xl:grid-cols-2">
+                                  <Field label="Display name">
+                                    <input
+                                      value={draft.full_name}
+                                      onChange={(event) =>
+                                        setAccountDrafts((current) => ({
+                                          ...current,
+                                          [account.id]: { ...draft, full_name: event.target.value },
+                                        }))
+                                      }
+                                      className={textInputClass()}
+                                    />
+                                  </Field>
+                                  <Field label="Reset password">
+                                    <input
+                                      type="password"
+                                      value={draft.password}
+                                      onChange={(event) =>
+                                        setAccountDrafts((current) => ({
+                                          ...current,
+                                          [account.id]: { ...draft, password: event.target.value },
+                                        }))
+                                      }
+                                      placeholder="Leave blank to keep current"
+                                      className={textInputClass()}
+                                    />
+                                  </Field>
+                                </div>
 
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <label className="auth-field">
-                              <span>Display name</span>
-                              <input
-                                value={draft.full_name}
-                                onChange={(event) =>
-                                  setAccountDrafts((current) => ({
-                                    ...current,
-                                    [account.id]: { ...draft, full_name: event.target.value },
-                                  }))
-                                }
-                              />
-                            </label>
-                            <label className="auth-field">
-                              <span>Reset password</span>
-                              <input
-                                type="password"
-                                value={draft.password}
-                                onChange={(event) =>
-                                  setAccountDrafts((current) => ({
-                                    ...current,
-                                    [account.id]: { ...draft, password: event.target.value },
-                                  }))
-                                }
-                                placeholder="Leave blank to keep current"
-                              />
-                            </label>
-                          </div>
-
-                          <div className="mt-4 grid gap-4 md:grid-cols-2">
-                            <label className="auth-checkbox">
-                              <input
-                                type="checkbox"
-                                checked={draft.is_active}
-                                onChange={(event) =>
-                                  setAccountDrafts((current) => ({
-                                    ...current,
-                                    [account.id]: { ...draft, is_active: event.target.checked },
-                                  }))
-                                }
-                              />
-                              <span>Account is active</span>
-                            </label>
-                            <label className="auth-checkbox">
-                              <input
-                                type="checkbox"
-                                checked={draft.role === "superadmin" || draft.all_locations}
-                                disabled={draft.role === "superadmin"}
-                                onChange={(event) =>
-                                  setAccountDrafts((current) => ({
-                                    ...current,
-                                    [account.id]: { ...draft, all_locations: event.target.checked },
-                                  }))
-                                }
-                              />
-                              <span>All surveillance locations</span>
-                            </label>
-                          </div>
-
-                          {draft.role !== "superadmin" && !draft.all_locations ? (
-                            <div className="mt-4">
-                              <div className="mb-2 text-sm font-medium text-slate-700">Allowed locations</div>
-                              <div className="grid gap-2 sm:grid-cols-2">
-                                {uniqueLocations.map((location) => (
-                                  <label key={`${account.id}-${location}`} className="auth-checkbox">
+                                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                                  <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
                                     <input
                                       type="checkbox"
-                                      checked={draft.allowed_locations.includes(location)}
-                                      onChange={() => handleDraftLocationToggle(account.id, location)}
+                                      className={checkboxClass()}
+                                      checked={draft.is_active}
+                                      onChange={(event) =>
+                                        setAccountDrafts((current) => ({
+                                          ...current,
+                                          [account.id]: { ...draft, is_active: event.target.checked },
+                                        }))
+                                      }
                                     />
-                                    <span>{location}</span>
+                                    <span>Account is active</span>
                                   </label>
-                                ))}
+                                  <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
+                                    <input
+                                      type="checkbox"
+                                      className={checkboxClass()}
+                                      checked={draft.role === "superadmin" || draft.all_locations}
+                                      disabled={draft.role === "superadmin"}
+                                      onChange={(event) =>
+                                        setAccountDrafts((current) => ({
+                                          ...current,
+                                          [account.id]: { ...draft, all_locations: event.target.checked },
+                                        }))
+                                      }
+                                    />
+                                    <span>All surveillance locations</span>
+                                  </label>
+                                </div>
+
+                                {draft.role !== "superadmin" && !draft.all_locations ? (
+                                  <div className="mt-4">
+                                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Allowed locations</div>
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                      {uniqueLocations.map((location) => (
+                                        <label key={`${account.id}-${location}`} className="flex items-center gap-3 border border-[var(--gov-line)] bg-white px-3 py-2 text-sm text-[var(--gov-ink)]">
+                                          <input
+                                            type="checkbox"
+                                            className={checkboxClass()}
+                                            checked={draft.allowed_locations.includes(location)}
+                                            onChange={() => handleDraftLocationToggle(account.id, location)}
+                                          />
+                                          <span>{location}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null}
+
+                                <div className="mt-4">
+                                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Permissions</div>
+                                  <div className="grid gap-2 xl:grid-cols-2">
+                                    {PERMISSION_META.map((permission) => (
+                                      <label key={`${account.id}-${permission.key}`} className="flex gap-3 border border-[var(--gov-line)] bg-white px-3 py-3 text-sm text-[var(--gov-ink)]">
+                                        <input
+                                          type="checkbox"
+                                          className={`${checkboxClass()} mt-0.5`}
+                                          checked={draft.role === "superadmin" || draft.permissions[permission.key]}
+                                          disabled={draft.role === "superadmin"}
+                                          onChange={(event) => handleDraftPermissionToggle(account.id, permission.key, event.target.checked)}
+                                        />
+                                        <span>
+                                          <strong className="block">{permission.label}</strong>
+                                          <span className="mt-1 block text-xs text-[var(--gov-muted)]">{permission.helper}</span>
+                                        </span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 flex justify-end">
+                                  <button
+                                    type="button"
+                                    className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
+                                    disabled={savingAdminId === account.id}
+                                    onClick={() => void handleSaveAdmin(account)}
+                                  >
+                                    {savingAdminId === account.id ? "Saving..." : "Save access"}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </SectionFrame>
+            ) : null}
+
+            <SectionFrame
+              kicker="Feed Register"
+              title="Camera Configuration"
+              actions={
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
+                  {visibleCameras.length} visible feeds
+                </span>
+              }
+            >
+              {isLoading ? <div className="py-6 text-sm text-[var(--gov-muted)]">Loading surveillance registry...</div> : null}
+              {!isLoading && visibleCameras.length === 0 ? (
+                <div className="border border-dashed border-[var(--gov-line-strong)] bg-[var(--gov-paper-alt)] px-4 py-8 text-sm text-[var(--gov-muted)]">
+                  No feeds match the current search or mode filter.
+                </div>
+              ) : null}
+
+              {!isLoading && visibleCameras.length > 0 ? (
+                <div className="border border-[var(--gov-line)] bg-white">
+                  <div className="hidden grid-cols-[140px_minmax(0,1fr)_150px_120px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)] md:grid">
+                    <span>Feed ID</span>
+                    <span>Location and File</span>
+                    <span>Mode</span>
+                    <span>Status</span>
+                    <span>Actions</span>
+                  </div>
+                  <div className="divide-y divide-[var(--gov-line)]">
+                    {visibleCameras.map((camera) => {
+                      const draft = drafts[camera.id] ?? createCameraDraft(camera);
+                      const isDirty = isCameraDraftDirty(camera, draft);
+                      const isSaving = savingId === camera.id;
+                      const isRemoving = removingId === camera.id;
+                      const isSaved = savedId === camera.id && !isDirty;
+                      const expanded = expandedCameraId === camera.id;
+
+                      return (
+                        <div key={camera.id}>
+                          <div className="grid items-center gap-3 px-4 py-3 md:grid-cols-[140px_minmax(0,1fr)_150px_120px_120px]">
+                            <div>
+                              <div className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--gov-blue)]">{camera.id}</div>
+                              <div className="mt-1 text-xs text-[var(--gov-muted)]">{camera.file_name}</div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-[var(--gov-ink)]">{draft.location || "Unnamed feed"}</div>
+                              <div className="mt-1 truncate text-xs text-[var(--gov-muted)]">{camera.address || "Configured through backend registry."}</div>
+                            </div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gov-muted)]">
+                              {draft.system_mode === "enforcement_mode" ? "Enforcement" : "Traffic light"}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                                camera.status === "active"
+                                  ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                                  : "border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] text-[var(--gov-red-dark)]"
+                              }`}>
+                                {camera.status}
+                              </span>
+                              {isDirty ? (
+                                <span className="inline-flex border border-[var(--gov-blue)] bg-[rgba(0,56,147,0.08)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--gov-blue)]">
+                                  Draft
+                                </span>
+                              ) : null}
+                              {isSaved ? (
+                                <span className="inline-flex border border-emerald-700 bg-emerald-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-emerald-800">
+                                  Saved
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex justify-start md:justify-end">
+                              <button
+                                type="button"
+                                className="border border-[var(--gov-line-strong)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                                onClick={() => setExpandedCameraId(expanded ? null : camera.id)}
+                              >
+                                {expanded ? "Hide" : "Edit"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {expanded ? (
+                            <div className="border-t border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
+                              <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+                                <div className="space-y-3">
+                                  <div className="overflow-hidden border border-[var(--gov-line)] bg-black">
+                                    {camera.video_url ? (
+                                      <video src={camera.video_url} className="aspect-video w-full object-cover" muted autoPlay loop playsInline preload="metadata" />
+                                    ) : (
+                                      <div className="flex aspect-video items-center justify-center text-sm text-white/70">No preview</div>
+                                    )}
+                                  </div>
+                                  <div className="space-y-2 text-sm">
+                                    {camera.location_link ? (
+                                      <a href={camera.location_link} target="_blank" rel="noopener noreferrer" className="block text-[var(--gov-blue)] underline underline-offset-4">
+                                        Open map link
+                                      </a>
+                                    ) : null}
+                                    {camera.video_url ? (
+                                      <a href={camera.video_url} target="_blank" rel="noopener noreferrer" className="block text-[var(--gov-blue)] underline underline-offset-4">
+                                        Open source clip
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                  <div className="grid gap-4 md:grid-cols-2">
+                                    <Field label="Display name">
+                                      <input
+                                        value={draft.location}
+                                        onChange={(event) => handleDraftChange(camera.id, "location", event.target.value)}
+                                        className={textInputClass()}
+                                        placeholder="Ward 4 Junction"
+                                      />
+                                    </Field>
+                                    <Field label="Intersection ID">
+                                      <input
+                                        value={draft.intersection_id}
+                                        onChange={(event) => handleDraftChange(camera.id, "intersection_id", event.target.value)}
+                                        className={textInputClass()}
+                                        placeholder="lakeside-main"
+                                      />
+                                    </Field>
+                                    <Field label="Lane names" wide>
+                                      <input
+                                        value={draft.lanes_text}
+                                        onChange={(event) => handleDraftChange(camera.id, "lanes_text", event.target.value)}
+                                        className={textInputClass()}
+                                        placeholder="north, south, east, west"
+                                      />
+                                    </Field>
+                                  </div>
+
+                                  <Field label="Operating mode">
+                                    <ModeButtons value={draft.system_mode} onChange={(value) => handleDraftChange(camera.id, "system_mode", value)} />
+                                  </Field>
+
+                                  <div className="grid gap-4">
+                                    <div className="border border-[var(--gov-line)] bg-white px-4 py-4">
+                                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Shared runtime tuning</div>
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Field label="Frame skip"><input value={draft.frame_skip} onChange={(event) => handleDraftChange(camera.id, "frame_skip", event.target.value)} className={textInputClass()} inputMode="numeric" placeholder="1" /></Field>
+                                        <Field label="FPS limit"><input value={draft.fps_limit} onChange={(event) => handleDraftChange(camera.id, "fps_limit", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="12" /></Field>
+                                        <Field label="Resolution width"><input value={draft.resolution_width} onChange={(event) => handleDraftChange(camera.id, "resolution_width", event.target.value)} className={textInputClass()} inputMode="numeric" placeholder="1280" /></Field>
+                                        <Field label="Resolution height"><input value={draft.resolution_height} onChange={(event) => handleDraftChange(camera.id, "resolution_height", event.target.value)} className={textInputClass()} inputMode="numeric" placeholder="720" /></Field>
+                                        <Field label="ROI config path"><input value={draft.roi_config_path} onChange={(event) => handleDraftChange(camera.id, "roi_config_path", event.target.value)} className={textInputClass()} placeholder="config/roi.json" /></Field>
+                                        <div className="grid gap-3 content-start">
+                                          <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
+                                            <input type="checkbox" className={checkboxClass()} checked={draft.ocr_enabled} onChange={(event) => handleDraftChange(camera.id, "ocr_enabled", event.target.checked)} />
+                                            <span>Enable OCR</span>
+                                          </label>
+                                          <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
+                                            <input type="checkbox" className={checkboxClass()} checked={draft.ocr_debug} onChange={(event) => handleDraftChange(camera.id, "ocr_debug", event.target.checked)} />
+                                            <span>OCR debug</span>
+                                          </label>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="border border-[var(--gov-line)] bg-white px-4 py-4">
+                                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Enforcement tuning</div>
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Field label="Detector confidence"><input value={draft.confidence_threshold} onChange={(event) => handleDraftChange(camera.id, "confidence_threshold", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.25" /></Field>
+                                        <Field label="Plate confidence"><input value={draft.plate_confidence_threshold} onChange={(event) => handleDraftChange(camera.id, "plate_confidence_threshold", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.25" /></Field>
+                                        <Field label="Character confidence"><input value={draft.char_confidence_threshold} onChange={(event) => handleDraftChange(camera.id, "char_confidence_threshold", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.20" /></Field>
+                                        <Field label="Helmet confidence"><input value={draft.helmet_confidence_threshold} onChange={(event) => handleDraftChange(camera.id, "helmet_confidence_threshold", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.30" /></Field>
+                                        <Field label="Overspeed threshold km/h"><input value={draft.overspeed_threshold_kmh} onChange={(event) => handleDraftChange(camera.id, "overspeed_threshold_kmh", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="60" /></Field>
+                                        <Field label="Helmet stability frames"><input value={draft.helmet_stability_frames} onChange={(event) => handleDraftChange(camera.id, "helmet_stability_frames", event.target.value)} className={textInputClass()} inputMode="numeric" placeholder="5" /></Field>
+                                        <Field label="Speed line 1 Y"><input value={draft.line1_y} onChange={(event) => handleDraftChange(camera.id, "line1_y", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.50" /></Field>
+                                        <Field label="Speed line 2 Y"><input value={draft.line2_y} onChange={(event) => handleDraftChange(camera.id, "line2_y", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.70" /></Field>
+                                        <Field label="Line distance meters"><input value={draft.line_distance_meters} onChange={(event) => handleDraftChange(camera.id, "line_distance_meters", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="12" /></Field>
+                                        <Field label="Line tolerance px"><input value={draft.line_tolerance_pixels} onChange={(event) => handleDraftChange(camera.id, "line_tolerance_pixels", event.target.value)} className={textInputClass()} inputMode="numeric" placeholder="15" /></Field>
+                                      </div>
+                                    </div>
+
+                                    <div className="border border-[var(--gov-line)] bg-white px-4 py-4">
+                                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Traffic management tuning</div>
+                                      <div className="grid gap-3 md:grid-cols-2">
+                                        <Field label="Stop speed threshold px"><input value={draft.stop_speed_threshold_px} onChange={(event) => handleDraftChange(camera.id, "stop_speed_threshold_px", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="2.0" /></Field>
+                                        <Field label="Stop frames threshold"><input value={draft.stop_frames_threshold} onChange={(event) => handleDraftChange(camera.id, "stop_frames_threshold", event.target.value)} className={textInputClass()} inputMode="numeric" placeholder="5" /></Field>
+                                        <Field label="Stop line distance px"><input value={draft.stop_line_distance_px} onChange={(event) => handleDraftChange(camera.id, "stop_line_distance_px", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="80" /></Field>
+                                        <Field label="Initial active lane"><input value={draft.initial_active_lane} onChange={(event) => handleDraftChange(camera.id, "initial_active_lane", event.target.value)} className={textInputClass()} placeholder="north" /></Field>
+                                        <Field label="Min green time"><input value={draft.min_green_time} onChange={(event) => handleDraftChange(camera.id, "min_green_time", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="10" /></Field>
+                                        <Field label="Max green time"><input value={draft.max_green_time} onChange={(event) => handleDraftChange(camera.id, "max_green_time", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="25" /></Field>
+                                        <Field label="Yellow time"><input value={draft.yellow_time} onChange={(event) => handleDraftChange(camera.id, "yellow_time", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="3" /></Field>
+                                        <Field label="Queue weight"><input value={draft.priority_queue_weight} onChange={(event) => handleDraftChange(camera.id, "priority_queue_weight", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.7" /></Field>
+                                        <Field label="Wait weight"><input value={draft.priority_wait_weight} onChange={(event) => handleDraftChange(camera.id, "priority_wait_weight", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.3" /></Field>
+                                        <Field label="Fairness weight"><input value={draft.fairness_weight} onChange={(event) => handleDraftChange(camera.id, "fairness_weight", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="0.1" /></Field>
+                                        <Field label="Max priority score"><input value={draft.max_priority_score} onChange={(event) => handleDraftChange(camera.id, "max_priority_score", event.target.value)} className={textInputClass()} inputMode="decimal" placeholder="100" /></Field>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--gov-line)] pt-4">
+                                    <div className="flex flex-wrap gap-2">
+                                      {isDirty ? (
+                                        <span className="inline-flex border border-[var(--gov-blue)] bg-[rgba(0,56,147,0.08)] px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--gov-blue)]">
+                                          Pending changes
+                                        </span>
+                                      ) : null}
+                                      {isSaved ? (
+                                        <span className="inline-flex border border-emerald-700 bg-emerald-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-emerald-800">
+                                          Saved
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)] disabled:opacity-60"
+                                        onClick={() => handleReset(camera)}
+                                        disabled={!isDirty || isSaving || isRemoving}
+                                      >
+                                        Reset
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="border border-[var(--gov-red)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-red-dark)] hover:bg-[rgba(193,39,45,0.06)] disabled:opacity-60"
+                                        onClick={() => void handleRemove(camera)}
+                                        disabled={isSaving || isRemoving}
+                                      >
+                                        {isRemoving ? "Removing..." : "Remove"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
+                                        onClick={() => void handleSave(camera.id)}
+                                        disabled={!isDirty || isSaving || isRemoving}
+                                      >
+                                        {isSaving ? "Saving..." : "Save"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           ) : null}
-
-                          <div className="mt-4">
-                            <div className="mb-2 text-sm font-medium text-slate-700">Permissions</div>
-                            <div className="grid gap-2 md:grid-cols-2">
-                              {PERMISSION_META.map((permission) => (
-                                <label key={`${account.id}-${permission.key}`} className="auth-checkbox auth-checkbox--stacked">
-                                  <input
-                                    type="checkbox"
-                                    checked={draft.role === "superadmin" || draft.permissions[permission.key]}
-                                    disabled={draft.role === "superadmin"}
-                                    onChange={(event) =>
-                                      handleDraftPermissionToggle(account.id, permission.key, event.target.checked)
-                                    }
-                                  />
-                                  <span>
-                                    <strong>{permission.label}</strong>
-                                    <small>{permission.helper}</small>
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="mt-4 flex justify-end">
-                            <button
-                              type="button"
-                              className="admin-action-btn admin-action-btn--primary"
-                              disabled={savingAdminId === account.id}
-                              onClick={() => void handleSaveAdmin(account)}
-                            >
-                              {savingAdminId === account.id ? "Saving access…" : "Save access"}
-                            </button>
-                          </div>
-                        </article>
+                        </div>
                       );
                     })}
                   </div>
                 </div>
-              </div>
-            </section>
-          ) : null}
-
-          {isLoading ? (
-            <div className="dash-placeholder card-glass admin-empty-state">
-              <h2 className="dash-placeholder-title">Loading surveillance registry</h2>
-              <p>Pulling feed configuration from the Python backend.</p>
-            </div>
-          ) : null}
-
-          {!isLoading && visibleCameras.length === 0 ? (
-            <div className="dash-placeholder card-glass admin-empty-state">
-              <h2 className="dash-placeholder-title">No matching feeds</h2>
-              <p>Adjust the search or mode filter, or add more surveillance clips on the backend.</p>
-            </div>
-          ) : null}
-
-          {!isLoading && visibleCameras.length > 0 ? (
-            <div className="admin-feed-grid">
-              {visibleCameras.map((camera) => {
-                const draft = drafts[camera.id] ?? createCameraDraft(camera);
-                const isDirty = isCameraDraftDirty(camera, draft);
-                const isSaving = savingId === camera.id;
-                const isRemoving = removingId === camera.id;
-                const isSaved = savedId === camera.id && !isDirty;
-
-                return (
-                  <section key={camera.id} className="admin-feed-card">
-                    <div className="admin-feed-preview">
-                      {camera.video_url ? (
-                        <video
-                          src={camera.video_url}
-                          className="admin-feed-image"
-                          muted
-                          autoPlay
-                          loop
-                          playsInline
-                          preload="metadata"
-                        />
-                      ) : (
-                        <div className="admin-feed-image admin-feed-image--empty">No preview</div>
-                      )}
-                      <div className="admin-feed-overlay">
-                        <span className="admin-feed-status">{camera.status}</span>
-                        <span className="admin-feed-mode-chip">
-                          {draft.system_mode === "enforcement_mode" ? "Enforcement" : "Traffic light"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="admin-feed-content">
-                      <div className="admin-feed-heading">
-                        <div>
-                          <p className="admin-card-eyebrow">{camera.id.toUpperCase()}</p>
-                          <h2 className="admin-card-title">{draft.location}</h2>
-                        </div>
-                        <span className="admin-file-pill">{camera.file_name}</span>
-                      </div>
-
-                      <p className="admin-card-copy">
-                        {camera.address || "Configured through the Python surveillance registry."}
-                      </p>
-
-                      <label className="admin-field">
-                        <span className="admin-field-label">Display name</span>
-                        <input
-                          value={draft.location}
-                          onChange={(event) => handleDraftChange(camera.id, "location", event.target.value)}
-                          className="admin-input"
-                          placeholder="Ward 4 Junction"
-                        />
-                      </label>
-
-                      <div className="admin-field">
-                        <span className="admin-field-label">Operating mode</span>
-                        <div className="admin-mode-toggle" role="tablist" aria-label={`Mode for ${camera.id}`}>
-                          {MODE_OPTIONS.map((option) => {
-                            const isActive = draft.system_mode === option.value;
-                            return (
-                              <button
-                                key={option.value}
-                                type="button"
-                                className={`admin-mode-option${isActive ? " admin-mode-option--active" : ""}`}
-                                onClick={() => handleDraftChange(camera.id, "system_mode", option.value)}
-                              >
-                                <span>{option.label}</span>
-                                <small>{option.helper}</small>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="admin-field">
-                        <span className="admin-field-label">Shared runtime tuning</span>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <label className="admin-field">
-                            <span className="admin-field-label">Frame skip</span>
-                            <input
-                              value={draft.frame_skip}
-                              onChange={(event) => handleDraftChange(camera.id, "frame_skip", event.target.value)}
-                              className="admin-input"
-                              placeholder="1"
-                              inputMode="numeric"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">FPS limit</span>
-                            <input
-                              value={draft.fps_limit}
-                              onChange={(event) => handleDraftChange(camera.id, "fps_limit", event.target.value)}
-                              className="admin-input"
-                              placeholder="12"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Resolution width</span>
-                            <input
-                              value={draft.resolution_width}
-                              onChange={(event) => handleDraftChange(camera.id, "resolution_width", event.target.value)}
-                              className="admin-input"
-                              placeholder="1280"
-                              inputMode="numeric"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Resolution height</span>
-                            <input
-                              value={draft.resolution_height}
-                              onChange={(event) => handleDraftChange(camera.id, "resolution_height", event.target.value)}
-                              className="admin-input"
-                              placeholder="720"
-                              inputMode="numeric"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">ROI config path</span>
-                            <input
-                              value={draft.roi_config_path}
-                              onChange={(event) => handleDraftChange(camera.id, "roi_config_path", event.target.value)}
-                              className="admin-input"
-                              placeholder="config/approach_rois_input6.json"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Intersection ID</span>
-                            <input
-                              value={draft.intersection_id}
-                              onChange={(event) => handleDraftChange(camera.id, "intersection_id", event.target.value)}
-                              className="admin-input"
-                              placeholder="lakeside-main"
-                            />
-                          </label>
-                          <label className="admin-field md:col-span-2">
-                            <span className="admin-field-label">Lane names</span>
-                            <input
-                              value={draft.lanes_text}
-                              onChange={(event) => handleDraftChange(camera.id, "lanes_text", event.target.value)}
-                              className="admin-input"
-                              placeholder="north, south, east, west"
-                            />
-                          </label>
-                          <label className="auth-checkbox">
-                            <input
-                              type="checkbox"
-                              checked={draft.ocr_enabled}
-                              onChange={(event) => handleDraftChange(camera.id, "ocr_enabled", event.target.checked)}
-                            />
-                            <span>Enable OCR</span>
-                          </label>
-                          <label className="auth-checkbox">
-                            <input
-                              type="checkbox"
-                              checked={draft.ocr_debug}
-                              onChange={(event) => handleDraftChange(camera.id, "ocr_debug", event.target.checked)}
-                            />
-                            <span>OCR debug</span>
-                          </label>
-                        </div>
-                      </div>
-
-                      <div className="admin-field">
-                        <span className="admin-field-label">Enforcement tuning</span>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <label className="admin-field">
-                            <span className="admin-field-label">Detector confidence</span>
-                            <input
-                              value={draft.confidence_threshold}
-                              onChange={(event) => handleDraftChange(camera.id, "confidence_threshold", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.25"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Plate confidence</span>
-                            <input
-                              value={draft.plate_confidence_threshold}
-                              onChange={(event) => handleDraftChange(camera.id, "plate_confidence_threshold", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.25"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Character confidence</span>
-                            <input
-                              value={draft.char_confidence_threshold}
-                              onChange={(event) => handleDraftChange(camera.id, "char_confidence_threshold", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.20"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Helmet confidence</span>
-                            <input
-                              value={draft.helmet_confidence_threshold}
-                              onChange={(event) => handleDraftChange(camera.id, "helmet_confidence_threshold", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.30"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Overspeed threshold km/h</span>
-                            <input
-                              value={draft.overspeed_threshold_kmh}
-                              onChange={(event) => handleDraftChange(camera.id, "overspeed_threshold_kmh", event.target.value)}
-                              className="admin-input"
-                              placeholder="60"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Helmet stability frames</span>
-                            <input
-                              value={draft.helmet_stability_frames}
-                              onChange={(event) => handleDraftChange(camera.id, "helmet_stability_frames", event.target.value)}
-                              className="admin-input"
-                              placeholder="5"
-                              inputMode="numeric"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Speed line 1 Y</span>
-                            <input
-                              value={draft.line1_y}
-                              onChange={(event) => handleDraftChange(camera.id, "line1_y", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.50"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Speed line 2 Y</span>
-                            <input
-                              value={draft.line2_y}
-                              onChange={(event) => handleDraftChange(camera.id, "line2_y", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.70"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Line distance meters</span>
-                            <input
-                              value={draft.line_distance_meters}
-                              onChange={(event) => handleDraftChange(camera.id, "line_distance_meters", event.target.value)}
-                              className="admin-input"
-                              placeholder="12"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Line tolerance px</span>
-                            <input
-                              value={draft.line_tolerance_pixels}
-                              onChange={(event) => handleDraftChange(camera.id, "line_tolerance_pixels", event.target.value)}
-                              className="admin-input"
-                              placeholder="15"
-                              inputMode="numeric"
-                            />
-                          </label>
-                        </div>
-                      </div>
-
-                      <div className="admin-field">
-                        <span className="admin-field-label">Traffic management tuning</span>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <label className="admin-field">
-                            <span className="admin-field-label">Stop speed threshold px</span>
-                            <input
-                              value={draft.stop_speed_threshold_px}
-                              onChange={(event) => handleDraftChange(camera.id, "stop_speed_threshold_px", event.target.value)}
-                              className="admin-input"
-                              placeholder="2.0"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Stop frames threshold</span>
-                            <input
-                              value={draft.stop_frames_threshold}
-                              onChange={(event) => handleDraftChange(camera.id, "stop_frames_threshold", event.target.value)}
-                              className="admin-input"
-                              placeholder="5"
-                              inputMode="numeric"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Stop line distance px</span>
-                            <input
-                              value={draft.stop_line_distance_px}
-                              onChange={(event) => handleDraftChange(camera.id, "stop_line_distance_px", event.target.value)}
-                              className="admin-input"
-                              placeholder="80"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Initial active lane</span>
-                            <input
-                              value={draft.initial_active_lane}
-                              onChange={(event) => handleDraftChange(camera.id, "initial_active_lane", event.target.value)}
-                              className="admin-input"
-                              placeholder="north"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Min green time</span>
-                            <input
-                              value={draft.min_green_time}
-                              onChange={(event) => handleDraftChange(camera.id, "min_green_time", event.target.value)}
-                              className="admin-input"
-                              placeholder="10"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Max green time</span>
-                            <input
-                              value={draft.max_green_time}
-                              onChange={(event) => handleDraftChange(camera.id, "max_green_time", event.target.value)}
-                              className="admin-input"
-                              placeholder="25"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Yellow time</span>
-                            <input
-                              value={draft.yellow_time}
-                              onChange={(event) => handleDraftChange(camera.id, "yellow_time", event.target.value)}
-                              className="admin-input"
-                              placeholder="3"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Queue weight</span>
-                            <input
-                              value={draft.priority_queue_weight}
-                              onChange={(event) => handleDraftChange(camera.id, "priority_queue_weight", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.7"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Wait weight</span>
-                            <input
-                              value={draft.priority_wait_weight}
-                              onChange={(event) => handleDraftChange(camera.id, "priority_wait_weight", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.3"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Fairness weight</span>
-                            <input
-                              value={draft.fairness_weight}
-                              onChange={(event) => handleDraftChange(camera.id, "fairness_weight", event.target.value)}
-                              className="admin-input"
-                              placeholder="0.1"
-                              inputMode="decimal"
-                            />
-                          </label>
-                          <label className="admin-field">
-                            <span className="admin-field-label">Max priority score</span>
-                            <input
-                              value={draft.max_priority_score}
-                              onChange={(event) => handleDraftChange(camera.id, "max_priority_score", event.target.value)}
-                              className="admin-input"
-                              placeholder="100"
-                              inputMode="decimal"
-                            />
-                          </label>
-                        </div>
-                      </div>
-
-                      <div className="admin-card-links">
-                        {camera.location_link ? (
-                          <a
-                            href={camera.location_link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="admin-card-link"
-                          >
-                            Open map link
-                          </a>
-                        ) : null}
-                        {camera.video_url ? (
-                          <a
-                            href={camera.video_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="admin-card-link"
-                          >
-                            Open source clip
-                          </a>
-                        ) : null}
-                      </div>
-
-                      <div className="admin-card-footer">
-                        <div className="admin-card-state">
-                          {isDirty ? <span className="admin-state-pill admin-state-pill--dirty">Pending changes</span> : null}
-                          {isSaved ? <span className="admin-state-pill admin-state-pill--saved">Saved</span> : null}
-                        </div>
-
-                        <div className="admin-card-actions">
-                          <button
-                            type="button"
-                            className="admin-action-btn admin-action-btn--ghost"
-                            onClick={() => handleReset(camera)}
-                            disabled={!isDirty || isSaving || isRemoving}
-                          >
-                            Reset
-                          </button>
-                          <button
-                            type="button"
-                            className="admin-action-btn admin-action-btn--danger"
-                            onClick={() => void handleRemove(camera)}
-                            disabled={isSaving || isRemoving}
-                          >
-                            {isRemoving ? "Removing…" : "Remove feed"}
-                          </button>
-                          <button
-                            type="button"
-                            className="admin-action-btn admin-action-btn--primary"
-                            onClick={() => void handleSave(camera.id)}
-                            disabled={!isDirty || isSaving || isRemoving}
-                          >
-                            {isSaving ? "Saving…" : "Save changes"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-          ) : null}
+              ) : null}
+            </SectionFrame>
+          </div>
         </div>
       </div>
     </div>

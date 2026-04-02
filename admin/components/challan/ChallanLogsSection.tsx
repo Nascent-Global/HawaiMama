@@ -1,14 +1,24 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { ChallanLog } from '@/types/challan';
-import { getChallans } from '@/lib/api';
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { getChallans } from "@/lib/api";
+import type { ChallanLog } from "@/types/challan";
 
-function valueOrPlaceholder(value: string | null | undefined, fallback = 'Not captured') {
+function valueOrPlaceholder(value: string | null | undefined, fallback = "Not captured") {
   return value && value.trim() ? value : fallback;
 }
 
-const ChallanLogsSection: React.FC = () => {
+function LedgerItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="border-b border-[var(--gov-line)] py-2 last:border-b-0">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">{label}</div>
+      <div className="mt-1 text-sm text-[var(--gov-ink)]">{value}</div>
+    </div>
+  );
+}
+
+export default function ChallanLogsSection() {
   const [challans, setChallans] = useState<ChallanLog[]>([]);
   const [selected, setSelected] = useState<ChallanLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,210 +32,256 @@ const ChallanLogsSection: React.FC = () => {
         const data = await getChallans();
         setChallans(data as unknown as ChallanLog[]);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load challans');
+        setError(loadError instanceof Error ? loadError.message : "Failed to load challans");
       } finally {
         setIsLoading(false);
       }
     }
-    load();
+
+    void load();
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col items-stretch py-6 px-6 overflow-y-auto relative w-full h-full text-black bg-white rounded-lg shadow-inner">
-      {!selected && (
-        <>
-          <h1 className="text-2xl font-bold mb-6">Challan Logs</h1>
-          {isLoading && <div className="text-sm text-gray-500">Loading challans…</div>}
-          {error && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <div className="w-full space-y-4">
-            {challans.map((c) => (
-              <div
-                key={c.id}
-                className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm"
-              >
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-xl font-bold text-blue-600">
-                    {c.owner.fullName[0].toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline space-x-3">
-                      <h3 className="text-lg font-semibold text-gray-900 truncate">{c.owner.fullName}</h3>
-                      <span className="text-sm text-gray-500">Age: {c.owner.age}</span>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {c.location.mapLink ? (
-                        <a
-                          href={c.location.mapLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline"
-                        >
-                          {valueOrPlaceholder(c.location.place)}
-                        </a>
-                      ) : (
-                        <span>{valueOrPlaceholder(c.location.place)}</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      challan id. {c.ticket.ticketNumber}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-start min-w-[200px]">
-                  <div className="text-sm font-semibold">{c.offense.title}</div>
-                  <div className="text-sm text-gray-600">fees: RS {c.offense.fineAmount}</div>
-                  <div className="mt-1 mb-2">
-                    <span className="inline-block px-2 py-0.5 bg-red-300 text-white font-mono text-xs font-bold tracking-widest rounded-sm border border-red-400">
-                      {c.vehicle.registrationNumber}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {c.ticket.time} | {c.ticket.issueDateBS}
-                  </div>
-                </div>
-
-                <button
-                  className="ml-4 px-4 py-2 border rounded text-sm font-medium bg-blue-50 hover:bg-blue-100"
-                  onClick={() => setSelected(c)}
-                >
-                  view challan
-                </button>
-              </div>
-            ))}
+    <section className="flex h-full min-h-[640px] flex-col overflow-hidden border border-[var(--gov-line)] bg-[var(--gov-paper)]">
+      <header className="border-b-4 border-[var(--gov-red)] bg-[var(--gov-paper-alt)] px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--gov-blue)]">
+              Revenue and Notice Register
+            </p>
+            <h1 className="mt-1 text-xl font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">
+              Challan Logs
+            </h1>
           </div>
-        </>
-      )}
-      
-      {selected && (
-        <div className="absolute inset-0 z-10 bg-gray-100 flex flex-col items-center overflow-y-auto pt-8 pb-12 shadow-inner">
-          <div className="w-full max-w-4xl bg-[#fefdfb] shadow-2xl border border-gray-300 rounded-sm flex flex-col relative mx-auto my-4 text-black font-serif">
-            {/* Top Action Bar (Overlay or sticky) */}
-            <div className="absolute top-0 w-full flex justify-end items-center px-4 py-2 border-b bg-[#fefdfb] border-gray-200 print:hidden sticky z-20 shadow-sm rounded-t-sm">
-              <button
-                className="px-4 py-1 text-xs border border-gray-300 rounded bg-white hover:bg-gray-50 mr-2 uppercase tracking-wide font-medium"
-                onClick={() => window.print()}
-              >
-                Print
-              </button>
-              <button
-                className="px-4 py-1 text-xs border border-gray-300 rounded bg-red-50 text-red-700 hover:bg-red-100 uppercase tracking-wide font-medium"
-                onClick={() => setSelected(null)}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="px-10 py-12 mt-10 w-full">
-              {/* Header */}
-              <div className="text-center mb-8 border-b-2 border-black pb-6 relative">
-                <h3 className="text-xl font-bold uppercase tracking-widest">{selected.authority.country}</h3>
-                {selected.authority.ministry ? (
-                  <h4 className="text-lg font-bold">{selected.authority.ministry}</h4>
-                ) : null}
-                {selected.authority.office ? (
-                  <h2 className="text-2xl font-black mt-2 underline">{selected.authority.office}</h2>
-                ) : null}
-                <h1 className="text-3xl font-black mt-4 uppercase tracking-[0.2em] text-red-700">Challan Details</h1>
-              </div>
-
-              {/* Top Record Info */}
-              {selected.metadata.isMockData && (
-                <div className="mb-4 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  Demo data — not real DoTM records
-                </div>
-              )}
-              <div className="flex justify-between items-start mb-6 text-sm font-bold border border-black p-4 bg-gray-50/50">
-                <div className="space-y-1">
-                  <div>TICKET NUMBER: <span className="text-red-700 text-lg tracking-wider">{selected.ticket.ticketNumber}</span></div>
-                  <div>ISSUE DATE (BS): {selected.ticket.issueDateBS}</div>
-                  <div>ISSUE DATE (AD): {selected.ticket.issueDateAD}</div>
-                </div>
-                <div className="space-y-1 text-right">
-                  <div>ISSUE TIME: {selected.ticket.time}</div>
-                  <div>PAYMENT: <span className="uppercase text-red-600">{selected.payment.status}</span></div>
-                  <div className="text-xs text-gray-500">CHALLAN ID: {selected.id}</div>
-                </div>
-              </div>
-
-              {/* Data Grid */}
-              <div className="border-t-2 border-l-2 border-r-2 border-black border-b-2 text-sm leading-relaxed mb-8">
-                
-                {/* Driver Section */}
-                <div className="grid grid-cols-1 md:grid-cols-2">
-                  <div className="p-3 border-r border-b border-black">
-                    <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-1">Offender Details</span>
-                    <div>Name: <span className="font-bold text-base">{valueOrPlaceholder(selected.owner.fullName)}</span></div>
-                    <div>Age: {selected.owner.age} &nbsp;&nbsp;|&nbsp;&nbsp; Contact: {valueOrPlaceholder(selected.owner.contactNumber)}</div>
-                    <div>Address: {valueOrPlaceholder(selected.owner.address)}</div>
-                  </div>
-                  <div className="p-3 border-b border-black">
-                    <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-1">License Details</span>
-                    <div>License No: <span className="font-bold">{valueOrPlaceholder(selected.license.licenseNumber)}</span></div>
-                    <div>Category: {valueOrPlaceholder(selected.license.category)} &nbsp;&nbsp;|&nbsp;&nbsp; Expires: {valueOrPlaceholder(selected.license.expiryDate)}</div>
-                  </div>
-                </div>
-
-                {/* Vehicle Section */}
-                <div className="grid grid-cols-1 md:grid-cols-2 bg-gray-50/30">
-                  <div className="p-3 border-r border-b border-black">
-                    <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-1">Vehicle Details</span>
-                    <div>Reg. Number: <span className="font-bold text-lg">{valueOrPlaceholder(selected.vehicle.registrationNumber)}</span></div>
-                    <div>Type: {valueOrPlaceholder(selected.vehicle.vehicleType, 'Vehicle')} ({valueOrPlaceholder(selected.vehicle.color)})</div>
-                    <div>Model: {valueOrPlaceholder(selected.vehicle.model)}</div>
-                  </div>
-                  <div className="p-3 border-b border-black flex flex-col justify-center items-center">
-                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Fine Amount (RS)</div>
-                    <div className="text-4xl font-black text-red-700">RS {selected.offense.fineAmount}/-</div>
-                  </div>
-                </div>
-
-                {/* Offense Section */}
-                <div className="p-4 border-b border-black">
-                    <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-2">Offense Record</span>
-                    <div className="mb-2">
-                      Section Ref: <span className="font-bold">{selected.offense.sectionCode}</span> &nbsp;&nbsp;|&nbsp;&nbsp;
-                      Points Deducted: <span className="font-bold text-red-600">{selected.offense.pointsDeducted}</span>
-                    </div>
-                    <div>Offense Title: <span className="font-bold underline">{selected.offense.title}</span></div>
-                    <div className="mt-2 text-gray-800 bg-gray-100 p-2 italic border-l-4 border-gray-400">
-                      &quot;{selected.offense.description}&quot;
-                    </div>
-                    <div className="mt-3">
-                      Location: <strong>{[selected.location.place, selected.location.district].filter((value) => value && value.trim()).join(', ') || 'Not captured'}</strong>
-                    </div>
-                </div>
-
-                {/* Officer Section */}
-                <div className="grid grid-cols-1 md:grid-cols-2">
-                  <div className="p-4 border-r border-black">
-                     <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-2">Issuing Authority</span>
-                     <div>Officer Name: {valueOrPlaceholder(selected.officer.name)}</div>
-                     <div>Rank: {valueOrPlaceholder(selected.officer.rank)}</div>
-                     <div>Badge Number: {valueOrPlaceholder(selected.officer.badgeNumber)}</div>
-                  </div>
-                  <div className="p-4 flex flex-col items-center justify-end relative h-32">
-                     <div className="absolute right-8 top-4 opacity-10 border-4 border-black rounded-full w-24 h-24 flex items-center justify-center transform -rotate-12 pointer-events-none">
-                       <span className="font-black text-xs text-center border-t border-b border-black py-1">OFFICIAL<br/>SEAL</span>
-                     </div>
-                     <div className="italic text-2xl font-[signature] opacity-70 mb-2">{selected.officer.signature || ''}</div>
-                     <div className="w-48 border-t border-black border-dashed pt-1 text-center font-bold text-xs">OFFICER SIGNATURE</div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Informational paragraph */}
-              <div className="text-justify text-xs text-gray-500 leading-tight">
-                This is a computer-generated challan based on {selected.metadata.source} evidence. Payment must be cleared within 35 days of issuance to avoid late penalties. Failure to comply may lead to license suspension and legal action. For dispute resolution, contact the central traffic authority immediately.
-              </div>
-
-            </div>
+          <div className="inline-flex items-center gap-2 border border-[var(--gov-line)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
+            <span>{challans.length}</span>
+            <span>Notices</span>
           </div>
         </div>
-      )}
-    </div>
-  );
-};
+      </header>
 
-export default ChallanLogsSection;
+      {error ? (
+        <div className="border-b border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-4 py-2 text-sm text-[var(--gov-red-dark)]">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(400px,1.05fr)]">
+        <div className="gov-scrollbar min-h-0 overflow-auto border-r border-[var(--gov-line)]">
+          <div className="hidden grid-cols-[150px_minmax(0,1fr)_120px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)] md:grid">
+            <span>Ticket</span>
+            <span>Offender</span>
+            <span>Fine</span>
+            <span>Status</span>
+          </div>
+
+          {isLoading ? <div className="px-4 py-8 text-sm text-[var(--gov-muted)]">Loading challan notices...</div> : null}
+          {!isLoading && challans.length === 0 ? (
+            <div className="px-4 py-8 text-sm text-[var(--gov-muted)]">No challan notices available.</div>
+          ) : null}
+
+          <div className="divide-y divide-[var(--gov-line)]">
+            {challans.map((challan) => {
+              const isSelected = selected?.id === challan.id;
+              return (
+                <button
+                  key={challan.id}
+                  type="button"
+                  onClick={() => setSelected(challan)}
+                  className={`grid w-full gap-3 px-4 py-3 text-left transition hover:bg-[var(--gov-highlight)] md:grid-cols-[150px_minmax(0,1fr)_120px_120px] ${
+                    isSelected ? "bg-[var(--gov-highlight)]" : "bg-white"
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="font-mono text-xs font-bold tracking-[0.16em] text-[var(--gov-red-dark)]">
+                      {challan.ticket.ticketNumber}
+                    </div>
+                    <div className="text-xs text-[var(--gov-muted)]">{challan.ticket.issueDateBS}</div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[var(--gov-ink)]">{challan.owner.fullName}</div>
+                    <div className="mt-1 truncate text-sm text-[var(--gov-muted)]">{challan.offense.title}</div>
+                    <div className="mt-1 truncate text-xs text-[var(--gov-muted)]">
+                      {valueOrPlaceholder(challan.location.place)} | {challan.vehicle.registrationNumber}
+                    </div>
+                  </div>
+                  <div className="text-sm font-semibold text-[var(--gov-ink)]">Rs {challan.offense.fineAmount}</div>
+                  <div>
+                    <span
+                      className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                        challan.payment.status.toLowerCase() === "paid"
+                          ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                          : "border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] text-[var(--gov-red-dark)]"
+                      }`}
+                    >
+                      {challan.payment.status}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="gov-scrollbar min-h-0 overflow-auto bg-[var(--gov-paper-alt)]">
+          {selected ? (
+            <div className="px-4 py-4 sm:px-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--gov-red)]">
+                    Official Notice
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">
+                    Traffic Challan Document
+                  </h2>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                    onClick={() => window.print()}
+                  >
+                    Print
+                  </button>
+                  <button
+                    type="button"
+                    className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                    onClick={() => setSelected(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-[var(--gov-line-strong)] bg-white shadow-[0_12px_30px_rgba(18,35,61,0.06)]">
+                <div className="border-b-4 border-[var(--gov-red)] px-6 py-6">
+                  <div className="text-center">
+                    <div className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--gov-blue)]">
+                      {selected.authority.country}
+                    </div>
+                    {selected.authority.ministry ? (
+                      <div className="mt-2 text-base font-semibold text-[var(--gov-ink)]">{selected.authority.ministry}</div>
+                    ) : null}
+                    {selected.authority.office ? (
+                      <div className="mt-2 text-2xl font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">
+                        {selected.authority.office}
+                      </div>
+                    ) : null}
+                    <div className="mt-4 inline-flex border border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[var(--gov-red-dark)]">
+                      Challan Details
+                    </div>
+                  </div>
+                </div>
+
+                <div className="px-6 py-5">
+                  {selected.metadata.isMockData ? (
+                    <div className="mb-4 border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      Demo data only. This notice is not from a live traffic authority ledger.
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-4 border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] p-4 md:grid-cols-2">
+                    <LedgerItem label="Ticket Number" value={selected.ticket.ticketNumber} />
+                    <LedgerItem label="Payment Status" value={selected.payment.status} />
+                    <LedgerItem label="Issue Date BS" value={selected.ticket.issueDateBS} />
+                    <LedgerItem label="Issue Date AD" value={selected.ticket.issueDateAD} />
+                    <LedgerItem label="Issue Time" value={selected.ticket.time} />
+                    <LedgerItem label="Challan ID" value={selected.id} />
+                  </div>
+
+                  <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.05fr)_260px]">
+                    <div className="space-y-4">
+                      <div className="grid gap-4 border border-[var(--gov-line)] p-4 md:grid-cols-2">
+                        <LedgerItem label="Offender Name" value={valueOrPlaceholder(selected.owner.fullName)} />
+                        <LedgerItem label="Contact" value={valueOrPlaceholder(selected.owner.contactNumber)} />
+                        <LedgerItem label="Address" value={valueOrPlaceholder(selected.owner.address)} />
+                        <LedgerItem label="Age" value={selected.owner.age} />
+                        <LedgerItem label="License Number" value={valueOrPlaceholder(selected.license.licenseNumber)} />
+                        <LedgerItem
+                          label="License Category"
+                          value={`${valueOrPlaceholder(selected.license.category)} | Expires ${valueOrPlaceholder(selected.license.expiryDate)}`}
+                        />
+                      </div>
+
+                      <div className="grid gap-4 border border-[var(--gov-line)] p-4 md:grid-cols-2">
+                        <LedgerItem label="Vehicle Registration" value={valueOrPlaceholder(selected.vehicle.registrationNumber)} />
+                        <LedgerItem
+                          label="Vehicle Type"
+                          value={`${valueOrPlaceholder(selected.vehicle.vehicleType, "Vehicle")} (${valueOrPlaceholder(selected.vehicle.color)})`}
+                        />
+                        <LedgerItem label="Vehicle Model" value={valueOrPlaceholder(selected.vehicle.model)} />
+                        <LedgerItem label="Fine Amount" value={<span className="font-bold text-[var(--gov-red-dark)]">Rs {selected.offense.fineAmount}/-</span>} />
+                      </div>
+
+                      <div className="border border-[var(--gov-line)] p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">
+                          Offense Record
+                        </div>
+                        <div className="mt-3 text-sm text-[var(--gov-ink)]">
+                          <div>
+                            Section Reference: <strong>{selected.offense.sectionCode}</strong>
+                          </div>
+                          <div className="mt-1">
+                            Points Deducted: <strong className="text-[var(--gov-red-dark)]">{selected.offense.pointsDeducted}</strong>
+                          </div>
+                          <div className="mt-3 font-semibold">{selected.offense.title}</div>
+                          <div className="mt-2 border-l-4 border-[var(--gov-blue)] bg-[var(--gov-highlight)] px-3 py-2 italic">
+                            {selected.offense.description}
+                          </div>
+                          <div className="mt-3">
+                            Location:{" "}
+                            <strong>
+                              {[selected.location.place, selected.location.district]
+                                .filter((value) => value && value.trim())
+                                .join(", ") || "Not captured"}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 border border-[var(--gov-line)] p-4 md:grid-cols-2">
+                        <LedgerItem label="Officer Name" value={valueOrPlaceholder(selected.officer.name)} />
+                        <LedgerItem label="Rank" value={valueOrPlaceholder(selected.officer.rank)} />
+                        <LedgerItem label="Badge Number" value={valueOrPlaceholder(selected.officer.badgeNumber)} />
+                        <LedgerItem label="Evidence Source" value={selected.metadata.source} />
+                      </div>
+
+                      <div className="text-xs leading-6 text-[var(--gov-muted)]">
+                        This is a computer-generated challan based on recorded traffic enforcement evidence. Payment should be cleared within 35 days of issuance to avoid late penalties. For dispute resolution, contact the issuing traffic office.
+                      </div>
+                    </div>
+
+                    <aside className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-blue)]">
+                        Seal and Signature
+                      </div>
+                      <div className="mt-6 flex h-40 items-center justify-center border border-dashed border-[var(--gov-line-strong)] bg-white">
+                        <div className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-[var(--gov-blue)]/20 text-center text-xs font-semibold uppercase tracking-[0.12em] text-[var(--gov-blue)]">
+                          Official
+                          <br />
+                          Seal
+                        </div>
+                      </div>
+                      <div className="mt-8 border-t border-dashed border-[var(--gov-line-strong)] pt-2 text-center text-xs font-semibold uppercase tracking-[0.15em] text-[var(--gov-muted)]">
+                        Officer Signature
+                      </div>
+                      <div className="mt-3 text-center text-xl text-[var(--gov-ink)]">
+                        {selected.officer.signature || "Authorized Signatory"}
+                      </div>
+                    </aside>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="px-4 py-8 sm:px-5">
+              <div className="border border-dashed border-[var(--gov-line-strong)] bg-white px-4 py-6 text-sm text-[var(--gov-muted)]">
+                Select a challan notice from the register to inspect the printable document layout.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}

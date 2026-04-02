@@ -2,15 +2,33 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import React, { useState, useEffect } from 'react';
-import { AccidentLog } from '@/types/accident';
-import { getAccidents, verifyAccident } from '@/lib/api';
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import { getAccidents, verifyAccident } from "@/lib/api";
+import type { AccidentLog } from "@/types/accident";
 
 function isStreamUrl(url: string): boolean {
-  return url.includes('/camera/') && url.endsWith('/stream');
+  return url.includes("/camera/") && url.endsWith("/stream");
 }
 
-const AccidentLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = false }) => {
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  return {
+    time: date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    date: date.toLocaleDateString("en-NP", { day: "numeric", month: "short", year: "numeric" }),
+  };
+}
+
+function MetaItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="border-b border-[var(--gov-line)] py-2 last:border-b-0">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">{label}</div>
+      <div className="mt-1 text-sm text-[var(--gov-ink)]">{value}</div>
+    </div>
+  );
+}
+
+export default function AccidentLogsSection({ canVerify = false }: { canVerify?: boolean }) {
   const [accidents, setAccidents] = useState<AccidentLog[]>([]);
   const [selected, setSelected] = useState<AccidentLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -25,187 +43,215 @@ const AccidentLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = fa
         const data = await getAccidents();
         setAccidents(data);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load accidents');
+        setError(loadError instanceof Error ? loadError.message : "Failed to load accidents");
       } finally {
         setIsLoading(false);
       }
     }
-    load();
+
+    void load();
   }, []);
 
   const handleVerify = async (id: string) => {
     try {
       setVerifyingId(id);
       const result = await verifyAccident(id);
-      setAccidents((prev) =>
-        prev.map((v) => (v.id === id ? result.accident : v))
-      );
+      setAccidents((prev) => prev.map((item) => (item.id === id ? result.accident : item)));
       setSelected((prev) => (prev && prev.id === id ? result.accident : prev));
     } catch (verifyError) {
-      setError(verifyError instanceof Error ? verifyError.message : 'Failed to verify accident');
+      setError(verifyError instanceof Error ? verifyError.message : "Failed to verify accident");
     } finally {
       setVerifyingId(null);
     }
   };
 
   return (
-    <div className="flex-1 flex flex-col items-stretch py-6 px-6 overflow-y-auto relative w-full h-full text-black bg-white rounded-lg shadow-inner">
-        {!selected && (
-          <>
-            <h1 className="text-2xl font-bold mb-6">Accident Logs</h1>
-            {isLoading && <div className="text-sm text-gray-500">Loading accidents…</div>}
-            {error && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-            <div className="w-full space-y-4">
-              {accidents.map((v) => (
-                <div
-                  key={v.id}
-                  className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 shadow-sm"
-                >
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-xl font-bold text-blue-600">
-                      {v.driverName[0]}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline space-x-3">
-                        <h3 className="text-lg font-semibold text-gray-900 truncate">{v.driverName}</h3>
-                        <span className="text-sm text-gray-500">Age: {v.age}</span>
-                      </div>
-                      <div className="mt-1 mb-2">
-                        <span className="inline-block px-3 py-1 bg-red-300 text-white font-mono text-xs font-bold tracking-widest rounded-md border-b-2 border-r-2 border-red-500 shadow-sm">
-                          {v.licensePlate}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {v.locationLink ? (
-                          <a
-                            href={v.locationLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline"
-                          >
-                            {v.tempAddress}
-                          </a>
-                        ) : (
-                          <span>{v.tempAddress}</span>
-                        )}
-                      </div>
-                      <div className="text-sm font-medium mt-1">{v.title}</div>
-                      <div className="text-xs text-gray-400">
-                        {new Date(v.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}{' '}
-                        | {new Date(v.timestamp).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    className="ml-4 px-4 py-2 border rounded text-sm font-medium bg-blue-50 hover:bg-blue-100"
-                    onClick={() => setSelected(v)}
-                  >
-                    more detail
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        {selected && (
-          <div className="absolute inset-0 z-10 bg-white flex flex-col overflow-y-auto">
-            <div className="flex justify-between items-center px-6 py-4 border-b">
-               <div>
-                <div className="text-lg font-semibold">{selected.title}</div>
-                <div className="mt-2 mb-2">
-                  <span className="inline-block px-3 py-1 bg-red-300 text-white font-mono text-sm font-bold tracking-widest rounded-md border-b-2 border-r-2 border-red-500 shadow-sm">
-                    {selected.licensePlate}
-                  </span>
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  {new Date(selected.timestamp).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}{' '}
-                  | {new Date(selected.timestamp).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </div>
-              </div>
-              <button
-                className="text-gray-500 border px-3 py-1 rounded hover:bg-gray-100"
-                onClick={() => setSelected(null)}
-              >
-                close
-              </button>
-            </div>
-            <div className="p-6 flex-1 overflow-y-auto">
-              <div className="flex items-center space-x-4 mb-4">
-                <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-blue-600">
-                  {selected.driverName[0]}
-                </div>
-                <div>
-                  <div className="font-semibold">{selected.driverName}</div>
-                  <div className="text-xs text-gray-500">DOB: {new Date(selected.dob).toLocaleDateString()}</div>
-                  <div className="text-xs text-gray-500">Blood Group: {selected.bloodGroup}</div>
-                  <div className="text-xs text-gray-500">Temp: {selected.tempAddress}</div>
-                  <div className="text-xs text-gray-500">Perm: {selected.permAddress}</div>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                <img src={selected.screenshot1Url} alt="Screenshot 1" className="rounded border object-cover h-24 w-full" />
-                <img src={selected.screenshot2Url} alt="Screenshot 2" className="rounded border object-cover h-24 w-full" />
-                <img src={selected.screenshot3Url} alt="Screenshot 3" className="rounded border object-cover h-24 w-full" />
-              </div>
-              <div className="mb-4">
-                {isStreamUrl(selected.videoUrl) ? (
-                  <div className="overflow-hidden rounded border bg-black">
-                    <img
-                      src={selected.videoUrl}
-                      alt={`Live stream for ${selected.title}`}
-                      className="w-full"
-                    />
-                  </div>
-                ) : (
-                  <video controls className="w-full rounded border">
-                    <source src={selected.videoUrl} type="video/mp4" />
-                    Your browser does not support the video tag.
-                  </video>
-                )}
-              </div>
-              <div className="mb-4 text-gray-700">{selected.description}</div>
-              <div className="flex items-center space-x-4">
-                {selected.locationLink ? (
-                  <a
-                    href={selected.locationLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 underline"
-                  >
-                    View on Map
-                  </a>
-                ) : null}
-                {!selected.verified && canVerify && (
-                  <button
-                    className="px-4 py-2 bg-[#3B82F6] text-white rounded font-medium hover:bg-blue-700"
-                    disabled={verifyingId === selected.id}
-                    onClick={() => handleVerify(selected.id)}
-                  >
-                    {verifyingId === selected.id ? 'Verifying…' : 'Verify & Generate Report'}
-                  </button>
-                )}
-                {!selected.verified && !canVerify && (
-                  <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded text-sm font-medium">
-                    Read-only access
-                  </span>
-                )}
-                {selected.verified && (
-                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm font-medium">
-                    Verified & Report Issued
-                  </span>
-                )}
-              </div>
-            </div>
+    <section className="flex h-full min-h-[640px] flex-col overflow-hidden border border-[var(--gov-line)] bg-[var(--gov-paper)]">
+      <header className="border-b-4 border-[var(--gov-red)] bg-[var(--gov-paper-alt)] px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--gov-blue)]">
+              Incident Register
+            </p>
+            <h1 className="mt-1 text-xl font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">
+              Accident Logs
+            </h1>
           </div>
-        )}
-    </div>
-  );
-};
+          <div className="inline-flex items-center gap-2 border border-[var(--gov-line)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
+            <span>{accidents.length}</span>
+            <span>Cases</span>
+          </div>
+        </div>
+      </header>
 
-export default AccidentLogsSection;
+      {error ? (
+        <div className="border-b border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-4 py-2 text-sm text-[var(--gov-red-dark)]">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.95fr)]">
+        <div className="gov-scrollbar min-h-0 overflow-auto border-r border-[var(--gov-line)]">
+          <div className="hidden grid-cols-[160px_minmax(0,1fr)_110px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)] md:grid">
+            <span>Vehicle</span>
+            <span>Incident Summary</span>
+            <span>Status</span>
+            <span>Time</span>
+          </div>
+
+          {isLoading ? <div className="px-4 py-8 text-sm text-[var(--gov-muted)]">Loading accident records...</div> : null}
+          {!isLoading && accidents.length === 0 ? (
+            <div className="px-4 py-8 text-sm text-[var(--gov-muted)]">No accident records available.</div>
+          ) : null}
+
+          <div className="divide-y divide-[var(--gov-line)]">
+            {accidents.map((accident) => {
+              const stamp = formatTimestamp(accident.timestamp);
+              const isSelected = selected?.id === accident.id;
+              return (
+                <button
+                  key={accident.id}
+                  type="button"
+                  onClick={() => setSelected(accident)}
+                  className={`grid w-full gap-3 px-4 py-3 text-left transition hover:bg-[var(--gov-highlight)] md:grid-cols-[160px_minmax(0,1fr)_110px_120px] ${
+                    isSelected ? "bg-[var(--gov-highlight)]" : "bg-white"
+                  }`}
+                >
+                  <div>
+                    <div className="inline-flex border border-[var(--gov-red)] bg-[rgba(193,39,45,0.1)] px-2 py-1 font-mono text-xs font-bold tracking-[0.2em] text-[var(--gov-red-dark)]">
+                      {accident.licensePlate}
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[var(--gov-ink)]">{accident.driverName}</div>
+                    <div className="mt-1 truncate text-sm text-[var(--gov-muted)]">{accident.title}</div>
+                    <div className="mt-1 truncate text-xs text-[var(--gov-muted)]">{accident.tempAddress}</div>
+                  </div>
+                  <div className="flex items-start">
+                    <span
+                      className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                        accident.verified
+                          ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                          : "border-[var(--gov-blue)] bg-[rgba(0,56,147,0.08)] text-[var(--gov-blue)]"
+                      }`}
+                    >
+                      {accident.verified ? "Reported" : "Pending"}
+                    </span>
+                  </div>
+                  <div className="text-xs text-[var(--gov-muted)]">
+                    <div>{stamp.time}</div>
+                    <div className="mt-1">{stamp.date}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="gov-scrollbar min-h-0 overflow-auto bg-[var(--gov-paper-alt)]">
+          {selected ? (
+            <div className="px-4 py-4 sm:px-5">
+              <div className="flex items-start justify-between gap-3 border-b border-[var(--gov-line-strong)] pb-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-red)]">
+                    Case Assessment
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold text-[var(--gov-ink)] [font-family:var(--font-heading)]">
+                    {selected.title}
+                  </h2>
+                  <div className="mt-2 inline-flex border border-[var(--gov-red)] bg-[rgba(193,39,45,0.1)] px-2 py-1 font-mono text-xs font-bold tracking-[0.22em] text-[var(--gov-red-dark)]">
+                    {selected.licensePlate}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                  onClick={() => setSelected(null)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+                <div className="space-y-4">
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <img src={selected.screenshot1Url} alt="Accident evidence 1" className="h-28 w-full border border-[var(--gov-line)] object-cover" />
+                    <img src={selected.screenshot2Url} alt="Accident evidence 2" className="h-28 w-full border border-[var(--gov-line)] object-cover" />
+                    <img src={selected.screenshot3Url} alt="Accident evidence 3" className="h-28 w-full border border-[var(--gov-line)] object-cover" />
+                  </div>
+
+                  <div className="border border-[var(--gov-line)] bg-black">
+                    {isStreamUrl(selected.videoUrl) ? (
+                      <img src={selected.videoUrl} alt={selected.title} className="w-full" />
+                    ) : (
+                      <video controls className="w-full">
+                        <source src={selected.videoUrl} type="video/mp4" />
+                      </video>
+                    )}
+                  </div>
+
+                  <div className="border border-[var(--gov-line)] bg-white px-4 py-3 text-sm leading-6 text-[var(--gov-ink)]">
+                    {selected.description}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {selected.locationLink ? (
+                      <a
+                        href={selected.locationLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="border border-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-blue)] hover:bg-[rgba(0,56,147,0.06)]"
+                      >
+                        Open map
+                      </a>
+                    ) : null}
+                    {!selected.verified && canVerify ? (
+                      <button
+                        type="button"
+                        className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
+                        disabled={verifyingId === selected.id}
+                        onClick={() => void handleVerify(selected.id)}
+                      >
+                        {verifyingId === selected.id ? "Verifying..." : "Verify and Issue Report"}
+                      </button>
+                    ) : null}
+                    {!selected.verified && !canVerify ? (
+                      <span className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
+                        Read only
+                      </span>
+                    ) : null}
+                    {selected.verified ? (
+                      <span className="border border-emerald-700 bg-emerald-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">
+                        Verified
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <aside className="border border-[var(--gov-line)] bg-white px-4 py-3">
+                  <div className="border-b border-[var(--gov-line)] pb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-blue)]">
+                    Driver and Incident Data
+                  </div>
+                  <div className="mt-2">
+                    <MetaItem label="Driver" value={selected.driverName} />
+                    <MetaItem label="Date of Birth" value={new Date(selected.dob).toLocaleDateString()} />
+                    <MetaItem label="Blood Group" value={selected.bloodGroup} />
+                    <MetaItem label="Age" value={selected.age} />
+                    <MetaItem label="Temporary Address" value={selected.tempAddress} />
+                    <MetaItem label="Permanent Address" value={selected.permAddress} />
+                  </div>
+                </aside>
+              </div>
+            </div>
+          ) : (
+            <div className="px-4 py-8 sm:px-5">
+              <div className="border border-dashed border-[var(--gov-line-strong)] bg-white px-4 py-6 text-sm text-[var(--gov-muted)]">
+                Select an accident record from the register to inspect the evidence and report status.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}

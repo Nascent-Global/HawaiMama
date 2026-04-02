@@ -6,6 +6,7 @@ export const SurveillanceFeedSchema = z.object({
   stream_video: z.string(),
   poster: z.string().nullable().optional(),
   videoUrl: z.string().optional(),
+  previewVideoUrl: z.string().nullable().optional(),
   processedVideoUrl: z.string().nullable().optional(),
   address: z.string(),
   location: z.string(),

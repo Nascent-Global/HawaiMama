@@ -96,6 +96,8 @@ class TrafficControlConfig:
     priority_wait_weight: float = 1.0
     fairness_weight: float = 0.1
     max_priority_score: float = 100.0
+    emergency_labels: tuple[str, ...] = ("ambulance", "fire truck", "fire_truck", "firetruck")
+    emergency_keywords: tuple[str, ...] = ("ambulance", "fire", "ems", "rescue")
 
 
 @dataclass(frozen=True, slots=True)

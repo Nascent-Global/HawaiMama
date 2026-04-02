@@ -56,12 +56,16 @@ def point_in_polygon(point: tuple[float, float], polygon: Polygon) -> bool:
 class LaneMetricsSnapshot:
     lane_counts: dict[str, int]
     lane_metrics: dict[str, dict[str, float | int]]
+    emergency_lane: str | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "lane_counts": dict(self.lane_counts),
             "lane_metrics": {lane: dict(values) for lane, values in self.lane_metrics.items()},
         }
+        if self.emergency_lane is not None:
+            payload["emergency_lane"] = self.emergency_lane
+        return payload
 
 
 class LaneAssignmentEngine:
@@ -72,6 +76,8 @@ class LaneAssignmentEngine:
         stop_speed_threshold_px: float,
         stop_frames_threshold: int,
         stop_line_distance_px: float,
+        emergency_labels: tuple[str, ...],
+        emergency_keywords: tuple[str, ...],
     ) -> None:
         self.roi_config_path = roi_config_path
         self.rois = load_named_rois(roi_config_path) if roi_config_path.exists() else {}
@@ -79,6 +85,8 @@ class LaneAssignmentEngine:
         self.stop_speed_threshold_px = stop_speed_threshold_px
         self.stop_frames_threshold = stop_frames_threshold
         self.stop_line_distance_px = stop_line_distance_px
+        self.emergency_labels = {label.lower() for label in emergency_labels}
+        self.emergency_keywords = tuple(keyword.lower() for keyword in emergency_keywords)
 
     def evaluate(
         self,
@@ -88,16 +96,22 @@ class LaneAssignmentEngine:
         lane_counts = {name: 0 for name in self.rois}
         lane_queues = {name: 0 for name in self.rois}
         lane_wait_totals = {name: 0.0 for name in self.rois}
+        emergency_lane: str | None = None
         for track in tracks:
             if track.label_name == "person":
                 track.metadata["approach"] = None
                 track.metadata["is_stopped"] = False
                 track.metadata["wait_time"] = 0.0
+                track.metadata["is_emergency"] = False
                 continue
             lane_name = self._assign_lane(track)
             track.metadata["approach"] = lane_name
             if lane_name is not None:
                 lane_counts[lane_name] += 1
+                is_emergency = self._is_emergency_vehicle(track)
+                track.metadata["is_emergency"] = is_emergency
+                if emergency_lane is None and is_emergency:
+                    emergency_lane = lane_name
                 if self._is_stopped_in_lane(track, lane_name, context):
                     lane_queues[lane_name] += 1
                     lane_wait_totals[lane_name] += float(track.metadata.get("wait_time", 0.0))
@@ -105,6 +119,7 @@ class LaneAssignmentEngine:
                 track.metadata["is_stopped"] = False
                 track.metadata["wait_time"] = 0.0
                 track.metadata.pop("wait_started_at", None)
+                track.metadata["is_emergency"] = False
         lane_metrics: dict[str, dict[str, float | int]] = {}
         for lane_name in self.rois:
             queue_count = lane_queues[lane_name]
@@ -116,7 +131,11 @@ class LaneAssignmentEngine:
                     2,
                 ),
             }
-        return LaneMetricsSnapshot(lane_counts=lane_counts, lane_metrics=lane_metrics)
+        return LaneMetricsSnapshot(
+            lane_counts=lane_counts,
+            lane_metrics=lane_metrics,
+            emergency_lane=emergency_lane,
+        )
 
     def _assign_lane(self, track: TrackState) -> str | None:
         point = track.bottom_center()
@@ -169,6 +188,18 @@ class LaneAssignmentEngine:
         previous_point = ((previous.x1 + previous.x2) / 2.0, previous.y2)
         current_point = ((current.x1 + current.x2) / 2.0, current.y2)
         return hypot(current_point[0] - previous_point[0], current_point[1] - previous_point[1])
+
+    def _is_emergency_vehicle(self, track: TrackState) -> bool:
+        label = track.label_name.lower()
+        if label in self.emergency_labels:
+            return True
+        candidates = [label]
+        if track.plate_text:
+            candidates.append(track.plate_text.lower())
+        raw_label = track.metadata.get("raw_label")
+        if raw_label:
+            candidates.append(str(raw_label).lower())
+        return any(keyword in candidate for candidate in candidates for keyword in self.emergency_keywords)
 
 
 def point_to_line_distance(point: tuple[float, float], line: Line) -> float:

@@ -90,6 +90,8 @@ class TrafficMonitoringPipeline:
             stop_speed_threshold_px=config.traffic_control.stop_speed_threshold_px,
             stop_frames_threshold=config.traffic_control.stop_frames_threshold,
             stop_line_distance_px=config.traffic_control.stop_line_distance_px,
+            emergency_labels=config.traffic_control.emergency_labels,
+            emergency_keywords=config.traffic_control.emergency_keywords,
         )
         lane_order = list(self.lane_assignment.rois) or [config.traffic_control.initial_active_lane]
         self.signal_state_machine = SignalStateMachine(
@@ -187,6 +189,7 @@ class TrafficMonitoringPipeline:
         signal_snapshot = self.signal_state_machine.update(
             context.timestamp_seconds,
             lane_metrics.lane_metrics,
+            emergency_lane=lane_metrics.emergency_lane,
         )
         self.rider_association.assign_riders(tracks)
         self.helmet_analyzer.enrich_tracks(frame, tracks)

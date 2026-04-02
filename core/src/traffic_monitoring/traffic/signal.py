@@ -17,6 +17,7 @@ class SignalSnapshot:
     time_remaining: float
     next_lane: str | None = None
     decision_scores: dict[str, float] | None = None
+    emergency_override: bool = False
 
     def to_dict(self) -> dict[str, str | float | dict[str, float] | None]:
         payload: dict[str, str | float | dict[str, float] | None] = {
@@ -30,6 +31,7 @@ class SignalSnapshot:
             payload["decision_scores"] = {
                 lane: round(score, 2) for lane, score in self.decision_scores.items()
             }
+        payload["emergency_override"] = self.emergency_override
         return payload
 
 
@@ -63,13 +65,28 @@ class SignalStateMachine:
         self.last_served_at_seconds = {lane: 0.0 for lane in self.lane_order}
         self.last_decision_scores: dict[str, float] = {}
         self.next_lane_candidate: str | None = None
+        self.emergency_override_active = False
 
     def update(
         self,
         timestamp_seconds: float,
         lane_metrics: dict[str, dict[str, float | int]],
+        emergency_lane: str | None = None,
     ) -> SignalSnapshot:
         elapsed = max(0.0, timestamp_seconds - self.state_started_at_seconds)
+
+        if emergency_lane is not None:
+            if emergency_lane == self.current_active_lane:
+                self.emergency_override_active = True
+            elif self.current_state == SignalState.GREEN:
+                self.next_lane_candidate = emergency_lane
+                self.current_state = SignalState.YELLOW
+                self.state_started_at_seconds = timestamp_seconds
+                elapsed = 0.0
+                self.emergency_override_active = True
+            elif self.current_state == SignalState.YELLOW:
+                self.next_lane_candidate = emergency_lane
+                self.emergency_override_active = True
 
         if self.current_state == SignalState.GREEN:
             if elapsed >= self.max_green_time:
@@ -77,12 +94,15 @@ class SignalStateMachine:
                 self.current_state = SignalState.YELLOW
                 self.state_started_at_seconds = timestamp_seconds
                 elapsed = 0.0
+                self.emergency_override_active = False
         elif self.current_state == SignalState.YELLOW:
             if elapsed >= self.yellow_time:
                 self.current_active_lane = self.next_lane_candidate or self._next_lane()
                 self.last_served_at_seconds[self.current_active_lane] = timestamp_seconds
                 self.current_state = SignalState.GREEN
                 self.state_started_at_seconds = timestamp_seconds
+                if emergency_lane is None or self.current_active_lane != emergency_lane:
+                    self.emergency_override_active = False
                 self.next_lane_candidate = None
                 elapsed = 0.0
 
@@ -93,6 +113,7 @@ class SignalStateMachine:
             time_remaining=time_remaining,
             next_lane=self.next_lane_candidate,
             decision_scores=self.last_decision_scores or None,
+            emergency_override=self.emergency_override_active,
         )
 
     def _time_remaining(self, timestamp_seconds: float) -> float:

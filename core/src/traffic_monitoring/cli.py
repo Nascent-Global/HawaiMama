@@ -89,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print OCR debug logs for plate processing.",
     )
     parser.add_argument(
+        "--disable-ocr",
+        action="store_true",
+        help="Disable plate OCR for this run.",
+    )
+    parser.add_argument(
         "--frame-skip",
         type=int,
         default=1,

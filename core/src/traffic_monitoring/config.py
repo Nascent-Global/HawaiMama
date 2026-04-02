@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -75,6 +76,8 @@ class RuntimeConfig:
     ocr_debug: bool = False
     system_mode: str = "traffic_management_mode"
     overlay_mode: str = "monitoring"
+    hide_person_speed_labels: bool = False
+    suppress_associated_person_boxes: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +311,8 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
             if str(getattr(namespace, "system_mode", base.runtime_options.system_mode)) == "traffic_management_mode"
             else "monitoring"
         ),
+        hide_person_speed_labels=base.runtime_options.hide_person_speed_labels,
+        suppress_associated_person_boxes=base.runtime_options.suppress_associated_person_boxes,
     )
     speed = SpeedConfig(
         enabled=str(getattr(namespace, "system_mode", base.runtime_options.system_mode)) != "traffic_management_mode",
@@ -333,8 +338,16 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
             else None
         ),
     )
+    ocr = OCRConfig(
+        enabled=base.ocr.enabled and not bool(getattr(namespace, "disable_ocr", False)),
+        languages=base.ocr.languages,
+        minimum_confidence=base.ocr.minimum_confidence,
+        enforce_plate_rules=base.ocr.enforce_plate_rules,
+        frame_interval=base.ocr.frame_interval,
+        stable_cooldown_frames=base.ocr.stable_cooldown_frames,
+    )
 
-    return TrafficMonitoringConfig(
+    config = TrafficMonitoringConfig(
         root=base.root,
         models=models,
         runtime=runtime,
@@ -346,9 +359,36 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
         speed=speed,
         wrong_lane=base.wrong_lane,
         face_capture=base.face_capture,
-        ocr=base.ocr,
+        ocr=ocr,
         output=OutputConfig(annotated_video_name=output_path.name, violations_filename=base.output.violations_filename),
     )
+    return apply_input_overrides(config)
+
+
+def apply_input_overrides(config: TrafficMonitoringConfig) -> TrafficMonitoringConfig:
+    input_name = config.runtime.input_video.name
+    if input_name == "input7.mp4":
+        runtime_options = replace(
+            config.runtime_options,
+            hide_person_speed_labels=True,
+            suppress_associated_person_boxes=True,
+        )
+        speed = replace(
+            config.speed,
+            enabled=True,
+            line1_y=0.30,
+            line2_y=0.56,
+            line_distance_meters=10.0,
+            line_tolerance_pixels=18,
+            overspeed_threshold_kmh=50.0,
+        )
+        performance = replace(
+            config.performance,
+            frame_skip=max(1, config.performance.frame_skip),
+            fps_limit=config.performance.fps_limit or 10.0,
+        )
+        return replace(config, runtime_options=runtime_options, speed=speed, performance=performance)
+    return config
 
 
 YOLO_CLASS_NAME_TO_ID: dict[str, int] = {
@@ -381,6 +421,7 @@ __all__ = [
     "WrongLaneConfig",
     "build_default_config",
     "config_from_namespace",
+    "apply_input_overrides",
     "ensure_output_directories",
     "project_root",
 ]

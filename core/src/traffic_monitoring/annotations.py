@@ -75,7 +75,9 @@ def _display_label(track: TrackState) -> str:
     return _label_name(track).title()
 
 
-def _format_speed(track: TrackState) -> str:
+def _format_speed(track: TrackState, *, hide_for_person: bool = False) -> str:
+    if hide_for_person and track.label_name == "person":
+        return "-"
     speed = track.smoothed_speed()
     if speed is None:
         speed = track.estimated_speed_kmh
@@ -124,10 +126,11 @@ def build_track_annotation(
     findings: Sequence[ViolationFinding] = (),
     *,
     style: AnnotationStyle | None = None,
+    hide_person_speed_labels: bool = False,
 ) -> TrackAnnotation:
     style = style or AnnotationStyle()
     color = choose_annotation_color(findings, style=style)
-    title = f"ID: {track.track_id} | {_display_label(track)} | {_format_speed(track)}"
+    title = f"ID: {track.track_id} | {_display_label(track)} | {_format_speed(track, hide_for_person=hide_person_speed_labels)}"
     lines = (
         AnnotationLine("Plate", _format_plate(track)),
         AnnotationLine("Violations", _join_violation_codes(findings)),
@@ -156,12 +159,28 @@ def annotations_for_tracks(
     violations_by_track: dict[int, Sequence[ViolationFinding]] | None = None,
     *,
     style: AnnotationStyle | None = None,
+    hide_person_speed_labels: bool = False,
+    suppress_associated_person_boxes: bool = False,
 ) -> list[TrackAnnotation]:
     style = style or AnnotationStyle()
     violations_by_track = violations_by_track or {}
+    associated_person_ids: set[int] = set()
+    if suppress_associated_person_boxes:
+        for track in tracks:
+            associated_person_ids.update(track.associated_person_ids)
     return [
-        build_track_annotation(track, violations_by_track.get(track.track_id, ()), style=style)
+        build_track_annotation(
+            track,
+            violations_by_track.get(track.track_id, ()),
+            style=style,
+            hide_person_speed_labels=hide_person_speed_labels,
+        )
         for track in tracks
+        if not (
+            suppress_associated_person_boxes
+            and track.label_name == "person"
+            and track.track_id in associated_person_ids
+        )
     ]
 
 
@@ -174,6 +193,8 @@ def annotate_frame(
     line2_y_ratio: float = 0.75,
     *,
     style: AnnotationStyle | None = None,
+    hide_person_speed_labels: bool = False,
+    suppress_associated_person_boxes: bool = False,
 ) -> np.ndarray:
     style = style or AnnotationStyle()
     annotated = frame.copy()
@@ -215,7 +236,13 @@ def annotate_frame(
         cv2.LINE_AA,
     )
 
-    for annotation in annotations_for_tracks(tracks, violations_by_track, style=style):
+    for annotation in annotations_for_tracks(
+        tracks,
+        violations_by_track,
+        style=style,
+        hide_person_speed_labels=hide_person_speed_labels,
+        suppress_associated_person_boxes=suppress_associated_person_boxes,
+    ):
         track = next((item for item in tracks if item.track_id == annotation.track_id), None)
         x1, y1, x2, y2 = (int(value) for value in annotation.bbox)
         cv2.rectangle(

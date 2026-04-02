@@ -139,13 +139,36 @@ class TrafficMonitoringPipeline:
     def run(self) -> RunSummary:
         ensure_output_directories(self.config)
         started_at = perf_counter()
-        frames_processed = sum(1 for _ in self.frame_generator())
+        frames_processed = 0
+        writer: cv2.VideoWriter | None = None
+
+        try:
+            for frame in self.frame_generator():
+                if writer is None:
+                    writer = self._create_output_writer(frame)
+                if writer is not None:
+                    writer.write(frame)
+                frames_processed += 1
+        finally:
+            if writer is not None:
+                writer.release()
 
         return RunSummary(
             frames_processed=frames_processed,
             elapsed_seconds=perf_counter() - started_at,
-            output_video=None,
+            output_video=self.config.output_video_path if frames_processed > 0 else None,
         )
+
+    def _create_output_writer(self, frame: np.ndarray) -> cv2.VideoWriter | None:
+        output_path = self.config.output_video_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fps = self.config.performance.fps_limit or self.config.runtime_options.fps_override or 12.0
+        height, width = frame.shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(output_path), fourcc, float(fps), (width, height))
+        if not writer.isOpened():
+            return None
+        return writer
 
     def frame_generator(
         self,
@@ -248,6 +271,8 @@ class TrafficMonitoringPipeline:
                 findings_by_track,
                 line1_y_ratio=self.config.speed.line1_y,
                 line2_y_ratio=self.config.speed.line2_y,
+                hide_person_speed_labels=self.config.runtime_options.hide_person_speed_labels,
+                suppress_associated_person_boxes=self.config.runtime_options.suppress_associated_person_boxes,
             )
         if self.enforcement_enabled:
             self.recorder.record(context, tracks, new_findings)

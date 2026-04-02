@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 
 import cv2
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from traffic_monitoring.config import TrafficMonitoringConfig, build_default_config
+from traffic_monitoring.config import TrafficMonitoringConfig, apply_input_overrides, build_default_config
 from traffic_monitoring.events import ViolationCode
 from traffic_monitoring.pipeline import TrafficMonitoringPipeline
 from traffic_monitoring.traffic import SignalStateMachine
@@ -37,14 +38,6 @@ def _build_camera_registry() -> dict[str, dict[str, object]]:
             "system_mode": "traffic_management_mode",
             "intersection_id": "main_intersection",
             "lanes": ["north", "east"],
-        }
-    )
-    cameras["cam7"].update(
-        {
-            "location": "Highway South",
-            "system_mode": "traffic_management_mode",
-            "intersection_id": "main_intersection",
-            "lanes": ["south", "west"],
         }
     )
     cameras["cam9"].update(
@@ -82,6 +75,7 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
     stream_output_dir = config.runtime.output_dir / camera_id
     runtime = replace(
         config.runtime,
+        input_video=Path(source),
         output_dir=stream_output_dir,
         snapshots_dir=stream_output_dir / "snapshots",
         records_path=stream_output_dir / config.output.violations_filename,
@@ -112,7 +106,7 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
         config.ocr,
         enabled=bool(camera.get("ocr_enabled", config.ocr.enabled)),
     )
-    return source, replace(
+    config = replace(
         config,
         runtime=runtime,
         runtime_options=runtime_options,
@@ -120,6 +114,7 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
         speed=speed,
         ocr=ocr,
     )
+    return source, apply_input_overrides(config)
 
 
 def _intersection_signal_machine(intersection_id: str) -> SignalStateMachine:

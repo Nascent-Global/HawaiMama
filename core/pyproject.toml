@@ -17,6 +17,8 @@ dependencies = [
   "fastapi>=0.115.0",
   "uvicorn>=0.32.0",
   "psycopg[binary]>=3.2.0",
+  "boto3>=1.42.81",
+  "python-dotenv>=1.2.2",
 ]
 
 [project.scripts]

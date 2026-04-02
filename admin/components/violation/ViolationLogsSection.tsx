@@ -10,12 +10,28 @@ function isStreamUrl(url: string): boolean {
   return url.includes('/camera/') && url.endsWith('/stream');
 }
 
+function evidenceVideoLabel(violation: ViolationLog): string {
+  if (!violation.videoUrl) {
+    return '';
+  }
+  if (violation.evidenceClipUrl && violation.videoUrl === violation.evidenceClipUrl) {
+    return 'Evidence clip';
+  }
+  if (isStreamUrl(violation.videoUrl)) {
+    return 'Live processed stream';
+  }
+  return 'Source clip';
+}
+
 const ViolationLogsSection: React.FC = () => {
   const [violations, setViolations] = useState<ViolationLog[]>([]);
   const [selected, setSelected] = useState<ViolationLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const selectedScreenshots = selected
+    ? [selected.screenshot1Url, selected.screenshot2Url, selected.screenshot3Url].filter(Boolean)
+    : [];
 
   useEffect(() => {
     async function load() {
@@ -138,29 +154,85 @@ const ViolationLogsSection: React.FC = () => {
                 <div>
                   <div className="font-semibold">{selected.driverName}</div>
                   <div className="text-xs text-gray-500">{selected.licensePlate}</div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {[selected.cameraId?.toUpperCase(), selected.cameraLocation || selected.tempAddress]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                <img src={selected.screenshot1Url} alt="Screenshot 1" className="rounded border object-cover h-24 w-full" />
-                <img src={selected.screenshot2Url} alt="Screenshot 2" className="rounded border object-cover h-24 w-full" />
-                <img src={selected.screenshot3Url} alt="Screenshot 3" className="rounded border object-cover h-24 w-full" />
+              <div className="mb-4 grid gap-3 rounded border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 md:grid-cols-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Camera</div>
+                  <div>{selected.cameraId?.toUpperCase() || 'Unknown feed'}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Location</div>
+                  {selected.cameraLocationLink ? (
+                    <a
+                      href={selected.cameraLocationLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline"
+                    >
+                      {selected.cameraLocation || selected.tempAddress}
+                    </a>
+                  ) : (
+                    <div>{selected.cameraLocation || selected.tempAddress}</div>
+                  )}
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Evidence Source</div>
+                  <div className="capitalize">{selected.evidenceProvider || 'local'}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Playback</div>
+                  <div>{evidenceVideoLabel(selected) || 'Unavailable'}</div>
+                </div>
               </div>
-              <div className="mb-4">
-                {isStreamUrl(selected.videoUrl) ? (
-                  <div className="overflow-hidden rounded border bg-black">
+              {selectedScreenshots.length > 0 && (
+                <div className={`grid gap-2 mb-4 ${selectedScreenshots.length === 1 ? 'grid-cols-1' : 'grid-cols-3'}`}>
+                  {selectedScreenshots.map((screenshot, index) => (
                     <img
-                      src={selected.videoUrl}
-                      alt={`Live stream for ${selected.title}`}
-                      className="w-full"
+                      key={screenshot}
+                      src={screenshot}
+                      alt={`Screenshot ${index + 1}`}
+                      className="rounded border object-cover h-24 w-full"
                     />
+                  ))}
+                </div>
+              )}
+              {selected.videoUrl && (
+                <div className="mb-4">
+                  <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <span>{evidenceVideoLabel(selected)}</span>
+                    {selected.sourceVideoUrl && selected.videoUrl !== selected.sourceVideoUrl && (
+                      <a
+                        href={selected.sourceVideoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 underline normal-case tracking-normal"
+                      >
+                        Open source clip
+                      </a>
+                    )}
                   </div>
-                ) : (
-                  <video controls className="w-full rounded border">
-                    <source src={selected.videoUrl} type="video/mp4" />
-                    Your browser does not support the video tag.
-                  </video>
-                )}
-              </div>
+                  {isStreamUrl(selected.videoUrl) ? (
+                    <div className="overflow-hidden rounded border bg-black">
+                      <img
+                        src={selected.videoUrl}
+                        alt={`Live stream for ${selected.title}`}
+                        className="w-full"
+                      />
+                    </div>
+                  ) : (
+                    <video controls className="w-full rounded border">
+                      <source src={selected.videoUrl} type="video/mp4" />
+                      Your browser does not support the video tag.
+                    </video>
+                  )}
+                </div>
+              )}
               <div className="mb-4 text-gray-700">{selected.description}</div>
               <div className="flex items-center space-x-4">
                 <a

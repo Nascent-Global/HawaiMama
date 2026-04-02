@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import re
+import subprocess
+import tempfile
+from collections import deque
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -8,6 +12,7 @@ from typing import Literal
 from uuid import uuid4
 
 import cv2
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -18,6 +23,7 @@ from traffic_monitoring.config import TrafficMonitoringConfig, apply_input_overr
 from traffic_monitoring.events import ViolationCode
 from traffic_monitoring.pipeline import TrafficMonitoringPipeline
 from traffic_monitoring.server.repository import AdminRepository, default_database_url
+from traffic_monitoring.storage import build_object_storage, load_object_storage_settings
 from traffic_monitoring.traffic import SignalStateMachine
 
 
@@ -65,8 +71,11 @@ app.add_middleware(
 )
 
 _base_config = build_default_config()
+load_dotenv(_base_config.root / ".env", override=False)
+_object_storage_settings = load_object_storage_settings(_base_config.root)
 _base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
 (_base_config.root / "surveillance").mkdir(parents=True, exist_ok=True)
+_object_storage_settings.local_root.mkdir(parents=True, exist_ok=True)
 app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_dir)), name="snapshots")
 app.mount("/inputs", StaticFiles(directory=str(_base_config.root / "input")), name="inputs")
 app.mount(
@@ -85,15 +94,25 @@ app.mount(
     ),
     name="surveillance-output",
 )
+app.mount(
+    "/wwwroots",
+    StaticFiles(
+        directory=str(_object_storage_settings.local_root),
+        follow_symlink=True,
+    ),
+    name="wwwroots",
+)
 
 cameras: dict[str, dict[str, object]] = _build_camera_registry(_base_config.root)
 repository = AdminRepository(default_database_url(), project_root=_base_config.root)
 repository.initialize(cameras)
+object_storage = build_object_storage(_base_config.root)
 
 events: list[dict[str, object]] = []
 traffic_state_by_camera: dict[str, dict[str, object]] = {}
 intersection_state_by_id: dict[str, dict[str, object]] = {}
 _seen_event_keys: set[tuple[str, float, int, str]] = set()
+_recent_frames_by_camera: dict[str, deque[tuple[float, object]]] = {}
 _api_event_codes = {
     ViolationCode.OVERSPEED.value,
     ViolationCode.NO_HELMET.value,
@@ -102,11 +121,22 @@ _api_event_codes = {
     ViolationCode.WRONG_LANE.value,
 }
 _intersection_signal_machines: dict[str, SignalStateMachine] = {}
+_VIOLATION_CLIP_PRE_SECONDS = 3.0
+_VIOLATION_CLIP_MAX_SECONDS = 6.0
 
 
 class CameraConfigUpdate(BaseModel):
     system_mode: Literal["enforcement_mode", "traffic_management_mode"] | None = None
     location: str | None = None
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "unknown"
+
+
+def _camera_location(camera_id: str) -> str:
+    return str(cameras.get(camera_id, {}).get("location", "Pokhara"))
 
 
 def _refresh_camera_inventory() -> None:
@@ -276,7 +306,6 @@ def _update_intersection_state(camera_id: str, pipeline: TrafficMonitoringPipeli
 def _save_snapshot(
     *,
     camera_id: str,
-    config: TrafficMonitoringConfig,
     track,
     context_time: float,
     violation: str,
@@ -292,20 +321,116 @@ def _save_snapshot(
     if crop.size == 0:
         return None
 
-    config.runtime.snapshots_dir.mkdir(parents=True, exist_ok=True)
-    timestamp_tag = f"{context_time:.3f}".replace(".", "_")
-    filename = f"{camera_id}_{track.track_id}_{violation}_{timestamp_tag}.jpg"
-    snapshot_path = config.runtime.snapshots_dir / filename
-    if not cv2.imwrite(str(snapshot_path), crop):
+    ok, encoded = cv2.imencode(".jpg", crop)
+    if not ok:
         return None
-    return f"/snapshots/{camera_id}/snapshots/{filename}"
+
+    timestamp = datetime.fromtimestamp(context_time, tz=UTC)
+    timestamp_tag = timestamp.strftime("%H%M%S_%f")
+    location_slug = _slugify(_camera_location(camera_id))
+    storage_key = (
+        f"violations/{timestamp:%Y/%m/%d}/{camera_id}-{location_slug}/"
+        f"{violation}/track-{track.track_id}/{timestamp_tag}_snapshot.jpg"
+    )
+    return object_storage.put_bytes(
+        storage_key,
+        encoded.tobytes(),
+        content_type="image/jpeg",
+    )
+
+
+def _remember_frame(camera_id: str, pipeline: TrafficMonitoringPipeline) -> None:
+    context = pipeline.last_context
+    frame = pipeline.last_frame
+    if context is None or frame is None:
+        return
+
+    frame_buffer = _recent_frames_by_camera.setdefault(camera_id, deque())
+    frame_buffer.append((context.timestamp_seconds, frame.copy()))
+    cutoff = context.timestamp_seconds - _VIOLATION_CLIP_MAX_SECONDS
+    while frame_buffer and frame_buffer[0][0] < cutoff:
+        frame_buffer.popleft()
+
+
+def _save_violation_clip(
+    *,
+    camera_id: str,
+    track,
+    context_time: float,
+    violation: str,
+) -> str | None:
+    frame_buffer = _recent_frames_by_camera.get(camera_id)
+    if not frame_buffer:
+        return None
+
+    clip_start_time = context_time - _VIOLATION_CLIP_PRE_SECONDS
+    selected_frames = [
+        (timestamp, frame)
+        for timestamp, frame in frame_buffer
+        if clip_start_time <= timestamp <= context_time
+    ]
+    if len(selected_frames) < 2:
+        return None
+
+    duration = max(selected_frames[-1][0] - selected_frames[0][0], 0.1)
+    fps = min(24.0, max(6.0, (len(selected_frames) - 1) / duration))
+    timestamp = datetime.fromtimestamp(context_time, tz=UTC)
+    timestamp_tag = timestamp.strftime("%H%M%S_%f")
+    location_slug = _slugify(_camera_location(camera_id))
+    storage_key = (
+        f"violations/{timestamp:%Y/%m/%d}/{camera_id}-{location_slug}/"
+        f"{violation}/track-{track.track_id}/{timestamp_tag}_clip.mp4"
+    )
+
+    with tempfile.TemporaryDirectory(prefix=f"{camera_id}_{violation}_") as temp_dir:
+        temp_path = Path(temp_dir)
+        for index, (_, frame) in enumerate(selected_frames):
+            frame_path = temp_path / f"frame_{index:05d}.jpg"
+            if not cv2.imwrite(str(frame_path), frame):
+                return None
+
+        clip_path = temp_path / "clip.mp4"
+        command = [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-framerate",
+            f"{fps:.2f}",
+            "-i",
+            str(temp_path / "frame_%05d.jpg"),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(clip_path),
+        ]
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return None
+        if not clip_path.exists():
+            return None
+
+        return object_storage.put_file(
+            storage_key,
+            clip_path,
+            content_type="video/mp4",
+        )
 
 
 def _camera_location_link(camera_id: str) -> str:
     camera = cameras.get(camera_id, {})
     return str(
         camera.get("location_link")
-        or f"https://maps.google.com/?q={str(camera.get('location', 'Pokhara')).replace(' ', '+')}"
+        or f"https://maps.google.com/?q={_camera_location(camera_id).replace(' ', '+')}"
     )
 
 
@@ -316,13 +441,14 @@ def _build_violation_record(
     timestamp_seconds: float,
     violation_code: str,
     image_path: str | None,
+    clip_url: str | None,
 ) -> dict[str, object]:
-    location = str(cameras.get(camera_id, {}).get("location", "Pokhara"))
+    location = _camera_location(camera_id)
     source_path = Path(str(cameras.get(camera_id, {}).get("source", "")))
     if source_path.parent.name == "surveillance":
-        video_url = f"/surveillance-media/{source_path.name}"
+        source_video_url = f"/surveillance-media/{source_path.name}"
     else:
-        video_url = f"/inputs/{source_path.name}"
+        source_video_url = f"/inputs/{source_path.name}"
     violation_titles = {
         "overspeed": "Overspeed Violation",
         "no_helmet": "No Helmet Detected",
@@ -350,14 +476,19 @@ def _build_violation_record(
         "timestamp": timestamp,
         "locationLink": _camera_location_link(camera_id),
         "screenshot1Url": image_path or "",
-        "screenshot2Url": image_path or "",
-        "screenshot3Url": image_path or "",
-        "videoUrl": video_url,
+        "screenshot2Url": "",
+        "screenshot3Url": "",
+        "videoUrl": clip_url or source_video_url,
         "description": (
             f"{violation_titles.get(violation_code, 'Traffic violation')} detected at "
             f"{location}. Plate read: {track.plate_text or 'pending verification'}."
         ),
         "verified": False,
+        "cameraLocation": location,
+        "cameraLocationLink": _camera_location_link(camera_id),
+        "evidenceProvider": object_storage.provider,
+        "evidenceClipUrl": clip_url or "",
+        "sourceVideoUrl": source_video_url,
         "createdAt": now,
         "updatedAt": now,
     }
@@ -368,7 +499,6 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
     if context is None:
         return
 
-    _, config = _camera_config(camera_id)
     tracks_by_id = {track.track_id: track for track in pipeline.last_tracks}
     for track_id, findings in pipeline.last_new_findings.items():
         track = tracks_by_id.get(track_id)
@@ -385,11 +515,16 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
             _seen_event_keys.add(event_key)
             image_path = _save_snapshot(
                 camera_id=camera_id,
-                config=config,
                 track=track,
                 context_time=timestamp,
                 violation=violation,
                 frame=pipeline.last_frame,
+            )
+            clip_url = _save_violation_clip(
+                camera_id=camera_id,
+                track=track,
+                context_time=timestamp,
+                violation=violation,
             )
             event_payload = {
                 "camera": camera_id,
@@ -399,6 +534,10 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
                 "plate": track.plate_text,
                 "violation": violation,
                 "image": image_path,
+                "video": clip_url,
+                "location": _camera_location(camera_id),
+                "location_link": _camera_location_link(camera_id),
+                "storage_provider": object_storage.provider,
             }
             events.append(event_payload)
             repository.ingest_violation_event(
@@ -408,6 +547,7 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
                     timestamp_seconds=timestamp,
                     violation_code=violation,
                     image_path=image_path,
+                    clip_url=clip_url,
                 ),
                 source_event_key=f"{camera_id}:{timestamp}:{track_id}:{violation}",
             )
@@ -417,6 +557,7 @@ def mjpeg_frame_generator(camera_id: str) -> Iterator[bytes]:
     source, config = _camera_config(camera_id)
     pipeline = TrafficMonitoringPipeline(config)
     for frame in pipeline.frame_generator(source):
+        _remember_frame(camera_id, pipeline)
         _record_new_events(camera_id, pipeline)
         _update_intersection_state(camera_id, pipeline)
         ok, encoded = cv2.imencode(".jpg", frame)

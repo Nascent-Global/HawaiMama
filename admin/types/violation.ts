@@ -18,6 +18,12 @@ export const ViolationLogSchema = z.object({
   videoUrl: z.string(),
   description: z.string(),
   verified: z.boolean(),
+  cameraId: z.string().optional(),
+  cameraLocation: z.string().optional(),
+  cameraLocationLink: z.string().optional(),
+  evidenceProvider: z.string().optional(),
+  evidenceClipUrl: z.string().optional(),
+  sourceVideoUrl: z.string().optional(),
 });
 
 export type ViolationLog = z.infer<typeof ViolationLogSchema>;

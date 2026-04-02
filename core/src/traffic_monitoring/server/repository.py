@@ -80,30 +80,42 @@ class AdminRepository:
             self._seed_demo_data(connection, seed_payloads)
             connection.commit()
 
+    def sync_cameras(self, cameras: dict[str, dict[str, object]]) -> None:
+        with self._connect() as connection:
+            self._create_tables(connection)
+            self._sync_cameras(connection, cameras)
+            connection.commit()
+
     def list_cameras(self) -> list[dict[str, Any]]:
         query = """
         SELECT camera_id, location, status, system_mode, source, metadata_json
         FROM cameras
+        WHERE status <> 'offline'
         ORDER BY camera_id
         """
         with self._connect() as connection:
             rows = connection.execute(query).fetchall()
         payload: list[dict[str, Any]] = []
         for row in rows:
-            metadata = _coerce_json(row["metadata_json"], {})
             source = str(row["source"])
+            location = str(row["location"])
             payload.append(
                 {
                     "id": row["camera_id"],
-                    "location": row["location"],
+                    "file_name": Path(source).name,
+                    "location": location,
                     "status": row["status"],
                     "system_mode": row["system_mode"],
+                    "mode_label": (
+                        "Traffic light mode"
+                        if row["system_mode"] == "traffic_management_mode"
+                        else "Enforcement mode"
+                    ),
                     "source": source,
                     "stream_url": f"/camera/{row['camera_id']}/stream",
-                    "video_url": f"/inputs/{Path(source).name}",
-                    "address": row["location"],
-                    "location_link": metadata.get("location_link")
-                    or f"https://maps.google.com/?q={str(row['location']).replace(' ', '+')}",
+                    "video_url": self._source_video_url(source),
+                    "address": location,
+                    "location_link": f"https://maps.google.com/?q={location.replace(' ', '+')}",
                 }
             )
         return payload
@@ -120,6 +132,96 @@ class AdminRepository:
             }
             for camera in self.list_cameras()
         ]
+
+    def update_camera_config(
+        self,
+        camera_id: str,
+        *,
+        system_mode: str | None = None,
+        location: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT camera_id, location, status, system_mode, source, metadata_json
+                FROM cameras
+                WHERE camera_id = %s
+                """,
+                (camera_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            next_location = location.strip() if location and location.strip() else row["location"]
+            next_mode = system_mode or row["system_mode"]
+            connection.execute(
+                """
+                UPDATE cameras
+                SET location = %s,
+                    system_mode = %s,
+                    updated_at = %s
+                WHERE camera_id = %s
+                """,
+                (next_location, next_mode, _utc_now(), camera_id),
+            )
+            connection.commit()
+        for camera in self.list_cameras():
+            if camera["id"] == camera_id:
+                return camera
+        return None
+
+    def update_camera(
+        self,
+        camera_id: str,
+        *,
+        location: str | None = None,
+        system_mode: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT camera_id, location, status, system_mode, source, metadata_json
+                FROM cameras
+                WHERE camera_id = %s
+                """,
+                (camera_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            metadata = _coerce_json(row["metadata_json"], {})
+            next_location = location.strip() if location is not None else str(row["location"])
+            next_system_mode = system_mode or str(row["system_mode"])
+            updated_at = _utc_now()
+            connection.execute(
+                """
+                UPDATE cameras
+                SET location = %s,
+                    system_mode = %s,
+                    updated_at = %s
+                WHERE camera_id = %s
+                """,
+                (next_location, next_system_mode, updated_at, camera_id),
+            )
+            connection.commit()
+            return {
+                "id": row["camera_id"],
+                "file_name": Path(str(row["source"])).name,
+                "location": next_location,
+                "status": row["status"],
+                "system_mode": next_system_mode,
+                "mode_label": (
+                    "Traffic light mode"
+                    if next_system_mode == "traffic_management_mode"
+                    else "Enforcement mode"
+                ),
+                "source": row["source"],
+                "stream_url": f"/camera/{row['camera_id']}/stream",
+                "video_url": self._source_video_url(str(row["source"])),
+                "address": next_location,
+                "location_link": metadata.get("location_link")
+                or f"https://maps.google.com/?q={next_location.replace(' ', '+')}",
+            }
 
     def list_violations(self) -> list[dict[str, Any]]:
         return self._list_payload_table("violations", order_by="event_time DESC, created_at DESC")
@@ -346,6 +448,15 @@ class AdminRepository:
         cameras: dict[str, dict[str, object]],
     ) -> None:
         now = _utc_now()
+        camera_ids = list(cameras)
+        if camera_ids:
+            placeholders = ", ".join(["%s"] * len(camera_ids))
+            connection.execute(
+                f"DELETE FROM cameras WHERE camera_id NOT IN ({placeholders})",
+                tuple(camera_ids),
+            )
+        else:
+            connection.execute("DELETE FROM cameras")
         for camera_id, camera in cameras.items():
             metadata = {
                 "intersection_id": camera.get("intersection_id"),
@@ -369,9 +480,6 @@ class AdminRepository:
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (camera_id) DO UPDATE SET
-                    location = EXCLUDED.location,
-                    status = EXCLUDED.status,
-                    system_mode = EXCLUDED.system_mode,
                     source = EXCLUDED.source,
                     metadata_json = EXCLUDED.metadata_json,
                     updated_at = EXCLUDED.updated_at
@@ -637,3 +745,9 @@ class AdminRepository:
             },
             "violationId": violation.get("id"),
         }
+
+    def _source_video_url(self, source: str) -> str:
+        path = Path(source)
+        if path.parent.name == "surveillance":
+            return f"/surveillance-media/{path.name}"
+        return f"/inputs/{path.name}"

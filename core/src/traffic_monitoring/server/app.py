@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import cv2
@@ -12,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from traffic_monitoring.config import TrafficMonitoringConfig, apply_input_overrides, build_default_config
 from traffic_monitoring.events import ViolationCode
@@ -20,35 +22,30 @@ from traffic_monitoring.server.repository import AdminRepository, SeedPayloads, 
 from traffic_monitoring.traffic import SignalStateMachine
 
 
-def _build_camera_registry() -> dict[str, dict[str, object]]:
+def _camera_sort_key(path: Path) -> tuple[int, str]:
+    suffix = path.stem[2:]
+    return (int(suffix) if suffix.isdigit() else 10_000, path.stem)
+
+
+def _discover_surveillance_videos(root: Path) -> list[Path]:
+    surveillance_dir = root / "surveillance"
+    surveillance_dir.mkdir(parents=True, exist_ok=True)
+    return sorted(surveillance_dir.glob("nv*.mp4"), key=_camera_sort_key)
+
+
+def _build_camera_registry(root: Path) -> dict[str, dict[str, object]]:
     cameras: dict[str, dict[str, object]] = {}
-    for index in range(1, 10):
-        camera_id = f"cam{index}"
+    for index, video_path in enumerate(_discover_surveillance_videos(root), start=1):
+        camera_id = video_path.stem.lower()
+        label = camera_id.upper() if camera_id.startswith("nv") else f"Input {index}"
         cameras[camera_id] = {
             "id": camera_id,
-            "source": f"input/input{index}.mp4",
-            "location": f"Input {index}",
+            "source": str(video_path),
+            "location": label,
+            "location_link": f"https://maps.google.com/?q={label.replace(' ', '+')}",
             "status": "online",
             "system_mode": "enforcement_mode",
         }
-
-    cameras["cam6"].update(
-        {
-            "location": "Lakeside",
-            "system_mode": "traffic_management_mode",
-            "intersection_id": "main_intersection",
-            "lanes": ["north", "east"],
-        }
-    )
-    cameras["cam9"].update(
-        {
-            "frame_skip": 2,
-            "resolution": (720, 1280),
-            "fps_limit": 8.0,
-            "ocr_debug": False,
-            "ocr_enabled": False,
-        }
-    )
     return cameras
 
 
@@ -87,10 +84,16 @@ app.add_middleware(
 
 _base_config = build_default_config()
 _base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
+(_base_config.root / "surveillance").mkdir(parents=True, exist_ok=True)
 app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_dir)), name="snapshots")
 app.mount("/inputs", StaticFiles(directory=str(_base_config.root / "input")), name="inputs")
+app.mount(
+    "/surveillance-media",
+    StaticFiles(directory=str(_base_config.root / "surveillance")),
+    name="surveillance-media",
+)
 
-cameras: dict[str, dict[str, object]] = _build_camera_registry()
+cameras: dict[str, dict[str, object]] = _build_camera_registry(_base_config.root)
 repository = AdminRepository(default_database_url(), project_root=_base_config.root)
 repository.initialize(cameras, _load_seed_payloads(_base_config.root))
 
@@ -108,7 +111,27 @@ _api_event_codes = {
 _intersection_signal_machines: dict[str, SignalStateMachine] = {}
 
 
+class CameraConfigUpdate(BaseModel):
+    system_mode: Literal["enforcement_mode", "traffic_management_mode"] | None = None
+    location: str | None = None
+
+
+def _refresh_camera_inventory() -> None:
+    global cameras
+    discovered = _build_camera_registry(_base_config.root)
+    repository.sync_cameras(discovered)
+    stored = {camera["id"]: camera for camera in repository.list_cameras()}
+    cameras = {
+        camera_id: {**camera, **stored.get(camera_id, {})}
+        for camera_id, camera in discovered.items()
+    }
+
+
+_refresh_camera_inventory()
+
+
 def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
+    _refresh_camera_inventory()
     camera = cameras.get(camera_id)
     if camera is None:
         raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
@@ -302,6 +325,11 @@ def _build_violation_record(
     image_path: str | None,
 ) -> dict[str, object]:
     location = str(cameras.get(camera_id, {}).get("location", "Pokhara"))
+    source_path = Path(str(cameras.get(camera_id, {}).get("source", "")))
+    if source_path.parent.name == "surveillance":
+        video_url = f"/surveillance-media/{source_path.name}"
+    else:
+        video_url = f"/inputs/{source_path.name}"
     violation_titles = {
         "overspeed": "Overspeed Violation",
         "no_helmet": "No Helmet Detected",
@@ -331,7 +359,7 @@ def _build_violation_record(
         "screenshot1Url": image_path or "",
         "screenshot2Url": image_path or "",
         "screenshot3Url": image_path or "",
-        "videoUrl": f"/inputs/{Path(str(cameras.get(camera_id, {}).get('source', ''))).name}",
+        "videoUrl": video_url,
         "description": (
             f"{violation_titles.get(violation_code, 'Traffic violation')} detected at "
             f"{location}. Plate read: {track.plate_text or 'pending verification'}."
@@ -407,14 +435,18 @@ def mjpeg_frame_generator(camera_id: str) -> Iterator[bytes]:
 
 @app.get("/video_feed")
 def video_feed() -> StreamingResponse:
+    _refresh_camera_inventory()
+    if not cameras:
+        raise HTTPException(status_code=404, detail="No surveillance videos found")
     return StreamingResponse(
-        mjpeg_frame_generator("cam1"),
+        mjpeg_frame_generator(next(iter(cameras))),
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
 
 @app.get("/camera/{camera_id}/stream")
 def camera_stream(camera_id: str) -> StreamingResponse:
+    _refresh_camera_inventory()
     return StreamingResponse(
         mjpeg_frame_generator(camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -423,6 +455,7 @@ def camera_stream(camera_id: str) -> StreamingResponse:
 
 @app.get("/surveillance/feeds")
 def surveillance_feeds() -> JSONResponse:
+    _refresh_camera_inventory()
     return JSONResponse(repository.list_surveillance_feeds())
 
 
@@ -433,7 +466,34 @@ def list_events() -> JSONResponse:
 
 @app.get("/cameras")
 def list_cameras() -> JSONResponse:
+    _refresh_camera_inventory()
     return JSONResponse(repository.list_cameras())
+
+
+@app.get("/admin/cameras")
+def list_camera_configs() -> JSONResponse:
+    _refresh_camera_inventory()
+    return JSONResponse(repository.list_cameras())
+
+
+@app.patch("/admin/cameras/{camera_id}")
+def update_camera_config(camera_id: str, update: CameraConfigUpdate) -> JSONResponse:
+    _refresh_camera_inventory()
+
+    camera = repository.update_camera_config(
+        camera_id,
+        system_mode=update.system_mode,
+        location=update.location,
+    )
+    if camera is None:
+        raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
+    if camera_id in cameras:
+        cameras[camera_id]["location"] = camera["location"]
+        cameras[camera_id]["status"] = camera["status"]
+        cameras[camera_id]["system_mode"] = camera["system_mode"]
+        cameras[camera_id]["source"] = camera["source"]
+        cameras[camera_id]["location_link"] = camera["location_link"]
+    return JSONResponse(camera)
 
 
 @app.get("/violations")

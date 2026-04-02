@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { getSurveillanceFeeds } from "@/lib/api";
 import type { SurveillanceFeed } from "@/types/surveillance";
@@ -218,6 +219,12 @@ export default function LiveSurveillanceDashboard() {
             />
             <SearchIcon />
           </div>
+          <Link
+            href="/admin"
+            className="dash-utility-link"
+          >
+            Feed Admin
+          </Link>
         </div>
       </div>
 

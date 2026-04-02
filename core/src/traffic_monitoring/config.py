@@ -69,6 +69,8 @@ class RuntimeConfig:
     fps_override: float | None = 12.0
     frame_limit: int | None = None
     helmet_debug: bool = False
+    system_mode: str = "traffic_management_mode"
+    overlay_mode: str = "monitoring"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,8 +94,8 @@ class TrafficControlConfig:
     max_green_time: float = 25.0
     yellow_time: float = 3.0
     initial_active_lane: str = "north"
-    priority_queue_weight: float = 2.0
-    priority_wait_weight: float = 1.0
+    priority_queue_weight: float = 0.7
+    priority_wait_weight: float = 0.3
     fairness_weight: float = 0.1
     max_priority_score: float = 100.0
     emergency_labels: tuple[str, ...] = ("ambulance", "fire truck", "fire_truck", "firetruck")
@@ -223,12 +225,15 @@ def build_default_config(root: Path | None = None) -> TrafficMonitoringConfig:
             face_detector=models_dir / "face.pt",
         ),
         runtime=RuntimePaths(
-            input_video=repo_root / "input.mp4",
+            input_video=repo_root / "input" / "input6.mp4",
             output_dir=output_dir,
             snapshots_dir=output_dir / "snapshots",
             records_path=output_dir / "violations.json",
         ),
-        runtime_options=RuntimeConfig(),
+        runtime_options=RuntimeConfig(
+            system_mode="traffic_management_mode",
+            overlay_mode="traffic_control",
+        ),
         performance=PerformanceConfig(),
         traffic_control=TrafficControlConfig(
             roi_config_path=config_dir / "approach_rois_input6.json",
@@ -289,9 +294,15 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
             else None
         ),
         helmet_debug=bool(getattr(namespace, "helmet_debug", base.runtime_options.helmet_debug)),
+        system_mode=str(getattr(namespace, "system_mode", base.runtime_options.system_mode)),
+        overlay_mode=(
+            "traffic_control"
+            if str(getattr(namespace, "system_mode", base.runtime_options.system_mode)) == "traffic_management_mode"
+            else "monitoring"
+        ),
     )
     speed = SpeedConfig(
-        enabled=base.speed.enabled,
+        enabled=str(getattr(namespace, "system_mode", base.runtime_options.system_mode)) != "traffic_management_mode",
         line1_y=base.speed.line1_y,
         line2_y=base.speed.line2_y,
         line_distance_meters=base.speed.line_distance_meters,

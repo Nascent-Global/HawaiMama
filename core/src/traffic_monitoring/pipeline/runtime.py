@@ -8,7 +8,7 @@ from typing import Iterator
 import cv2
 import numpy as np
 
-from traffic_monitoring.annotations import annotate_frame
+from traffic_monitoring.annotations import annotate_frame, annotate_traffic_control_frame
 from traffic_monitoring.config import (
     build_default_config,
     TrafficMonitoringConfig,
@@ -41,10 +41,15 @@ class RunSummary:
 class TrafficMonitoringPipeline:
     def __init__(self, config: TrafficMonitoringConfig) -> None:
         self.config = config
+        self.system_mode = config.runtime_options.system_mode
+        self.enforcement_enabled = self.system_mode == "enforcement_mode"
         plate_detector_path = config.models.plate_detector
-        plate_enabled = plate_detector_path.exists()
-        helmet_enabled = config.models.helmet_detector.exists()
-        face_enabled = bool(config.models.face_detector and config.models.face_detector.exists())
+        plate_enabled = self.enforcement_enabled and plate_detector_path.exists()
+        helmet_enabled = self.enforcement_enabled and config.models.helmet_detector.exists()
+        face_enabled = (
+            self.enforcement_enabled
+            and bool(config.models.face_detector and config.models.face_detector.exists())
+        )
         self.detector = YOLODetector(
             config.models.main_detector,
             confidence=config.detection.confidence_threshold,
@@ -191,28 +196,42 @@ class TrafficMonitoringPipeline:
             lane_metrics.lane_metrics,
             emergency_lane=lane_metrics.emergency_lane,
         )
-        self.rider_association.assign_riders(tracks)
-        self.helmet_analyzer.enrich_tracks(frame, tracks)
-        self.face_capture.enrich_tracks(frame, tracks)
-        self.plate_recognizer.enrich_tracks(frame, tracks)
-        findings_by_track = self.violation_engine.evaluate(context, tracks)
+        if self.enforcement_enabled:
+            self.rider_association.assign_riders(tracks)
+            self.helmet_analyzer.enrich_tracks(frame, tracks)
+            self.face_capture.enrich_tracks(frame, tracks)
+            self.plate_recognizer.enrich_tracks(frame, tracks)
+            findings_by_track = self.violation_engine.evaluate(context, tracks)
+            new_findings = self.violation_engine.new_findings
+        else:
+            findings_by_track = {}
+            new_findings = {}
         self.last_context = context
         self.last_tracks = list(tracks)
         self.last_findings_by_track = findings_by_track
-        self.last_new_findings = self.violation_engine.new_findings
+        self.last_new_findings = new_findings
         self.last_frame = frame.copy()
         self.last_traffic_state = lane_metrics.to_dict()
         self.last_traffic_state["signal"] = signal_snapshot.to_dict()
 
-        annotated = annotate_frame(
-            frame,
-            tracks,
-            context,
-            findings_by_track,
-            line1_y_ratio=self.config.speed.line1_y,
-            line2_y_ratio=self.config.speed.line2_y,
-        )
-        self.recorder.record(context, tracks, self.violation_engine.new_findings)
+        if self.config.runtime_options.overlay_mode == "traffic_control":
+            annotated = annotate_traffic_control_frame(
+                frame,
+                context,
+                self.lane_assignment.rois,
+                self.last_traffic_state,
+            )
+        else:
+            annotated = annotate_frame(
+                frame,
+                tracks,
+                context,
+                findings_by_track,
+                line1_y_ratio=self.config.speed.line1_y,
+                line2_y_ratio=self.config.speed.line2_y,
+            )
+        if self.enforcement_enabled:
+            self.recorder.record(context, tracks, new_findings)
         return annotated
 
     def _detect(self, frame) -> list[InferenceDetection]:

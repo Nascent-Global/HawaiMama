@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("input.mp4"),
+        default=Path("input/input6.mp4"),
         help="Path to the input video.",
     )
     parser.add_argument(
@@ -28,6 +28,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--show",
         action="store_true",
         help="Display the annotated frames while processing.",
+    )
+    parser.add_argument(
+        "--system-mode",
+        type=str,
+        default="traffic_management_mode",
+        choices=("enforcement_mode", "traffic_management_mode"),
+        help="Switch between enforcement and traffic-management behavior.",
     )
     parser.add_argument(
         "--primary-model",

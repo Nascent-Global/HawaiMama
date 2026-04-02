@@ -301,3 +301,106 @@ def annotate_frame(
         cv2.LINE_AA,
     )
     return annotated
+
+
+def annotate_traffic_control_frame(
+    frame: np.ndarray,
+    context: FrameContext,
+    rois: dict[str, Sequence[tuple[int, int]]],
+    traffic_state: dict[str, object] | None,
+    *,
+    style: AnnotationStyle | None = None,
+) -> np.ndarray:
+    style = style or AnnotationStyle()
+    annotated = frame.copy()
+    traffic_state = traffic_state or {}
+    lane_metrics = traffic_state.get("lane_metrics", {})
+    signal = traffic_state.get("signal", {})
+    active_lane = signal.get("active_lane")
+    signal_state = str(signal.get("state", "UNKNOWN"))
+    time_remaining = signal.get("time_remaining")
+
+    lane_palette: dict[str, ColorRGB] = {
+        "north": (255, 180, 0),
+        "south": (255, 0, 180),
+        "east": (0, 180, 255),
+        "west": (180, 255, 0),
+    }
+    overlay = annotated.copy()
+    for lane_name, polygon in rois.items():
+        if len(polygon) < 3:
+            continue
+        points = np.array(polygon, dtype=np.int32)
+        cv2.fillPoly(overlay, [points], lane_palette.get(lane_name, (140, 140, 140)))
+    annotated = cv2.addWeighted(overlay, 0.10, annotated, 0.90, 0.0)
+
+    for lane_name, polygon in rois.items():
+        if len(polygon) < 3:
+            continue
+        points = np.array(polygon, dtype=np.int32)
+        is_active_green = lane_name == active_lane and signal_state == "GREEN"
+        border_color: ColorRGB = (0, 220, 0) if is_active_green else (0, 0, 220)
+        cv2.polylines(annotated, [points], isClosed=True, color=border_color, thickness=3)
+
+        metrics = lane_metrics.get(lane_name, {})
+        count = int(metrics.get("count", 0))
+        queue = int(metrics.get("queue", 0))
+        avg_wait = float(metrics.get("avg_wait", 0.0))
+        x, y, w, h = cv2.boundingRect(points)
+        panel_x1 = max(12, min(context.width - 190, x + 8))
+        panel_y1 = max(60, min(context.height - 86, y + 8))
+        panel_x2 = panel_x1 + 180
+        panel_y2 = panel_y1 + 74
+        cv2.rectangle(annotated, (panel_x1, panel_y1), (panel_x2, panel_y2), style.background_color, thickness=-1)
+        cv2.rectangle(annotated, (panel_x1, panel_y1), (panel_x2, panel_y2), border_color, thickness=2)
+        lines = [
+            lane_name.upper(),
+            f"Count: {count}",
+            f"Queue: {queue}",
+            f"Avg wait: {avg_wait:.1f}s",
+        ]
+        baseline = panel_y1 + 18
+        for line in lines:
+            cv2.putText(
+                annotated,
+                line,
+                (panel_x1 + 6, baseline),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.48,
+                style.text_color,
+                1,
+                cv2.LINE_AA,
+            )
+            baseline += 16
+
+    signal_text = f"{signal_state}: {active_lane}" if active_lane else f"{signal_state}: -"
+    if time_remaining is not None:
+        signal_text = f"{signal_text} ({float(time_remaining):.1f}s)"
+    state_color: ColorRGB = (
+        (0, 220, 0) if signal_state == "GREEN" else (0, 215, 255) if signal_state == "YELLOW" else (0, 0, 220)
+    )
+    cv2.rectangle(annotated, (12, 12), (340, 50), style.background_color, thickness=-1)
+    cv2.rectangle(annotated, (12, 12), (340, 50), state_color, thickness=2)
+    cv2.putText(
+        annotated,
+        signal_text,
+        (22, 38),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.72,
+        style.text_color,
+        2,
+        cv2.LINE_AA,
+    )
+
+    footer = f"Frame {context.frame_index} | {context.timestamp_seconds:.2f}s"
+    cv2.putText(
+        annotated,
+        footer,
+        (12, annotated.shape[0] - 12),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        style.text_color,
+        2,
+        cv2.LINE_AA,
+    )
+    return annotated

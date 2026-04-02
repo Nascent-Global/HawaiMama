@@ -4,6 +4,9 @@ import Image from "next/image";
 import { useMemo, useState } from "react";
 import { mockSurveillanceFeeds } from "@/lib/mock-surveillance-feeds";
 import type { SurveillanceFeed } from "@/types/surveillance";
+import ViolationLogsSection from "@/components/violation/ViolationLogsSection";
+import AccidentLogsSection from "@/components/accident/AccidentLogsSection";
+import ChallanLogsSection from "@/components/challan/ChallanLogsSection";
 
 type NavKey = "live" | "violations" | "accidents" | "challan";
 
@@ -148,38 +151,40 @@ export default function LiveSurveillanceDashboard() {
 
   return (
     <div className="dash-root">
-      <header className="logo-strip" role="banner">
-        <div className="logo-strip-inner">
-          <div className="logo-strip-brand">
-            <Image
-              src="/logo.png"
-              alt="Hawai Mama — smart traffic monitoring"
-              width={200}
-              height={56}
-              className="logo-strip-img"
-              priority
-              sizes="(max-width: 400px) 160px, 200px"
-            />
-            <p className="logo-strip-tagline">Pokhara Metropolitan · e‑Gov pilot</p>
+      <div className="dash-top-bar">
+        <header className="logo-strip" role="banner">
+          <div className="logo-strip-inner">
+            <div className="logo-strip-brand">
+              <Image
+                src="/logo.png"
+                alt="Hawai Mama — smart traffic monitoring"
+                width={200}
+                height={56}
+                className="logo-strip-img"
+                priority
+                sizes="(max-width: 400px) 160px, 200px"
+              />
+              <p className="logo-strip-tagline">
+                Smart Traffic Management and Incident Response System
+              </p>
+            </div>
           </div>
-        </div>
-      </header>
-
-      <div className="dash-toolbar">
-        <div className="dash-search-wrap">
-          <input
-            type="search"
-            className="dash-search"
-            placeholder="Search cameras, wards, plate numbers…"
-            aria-label="Search dashboard"
-          />
-          <SearchIcon />
+        </header>
+        <div className="dash-toolbar dash-toolbar--inline">
+          <div className="dash-search-wrap">
+            <input
+              type="search"
+              className="dash-search"
+              placeholder="Search cameras, wards, plate numbers…"
+              aria-label="Search dashboard"
+            />
+            <SearchIcon />
+          </div>
         </div>
       </div>
 
       <div className="dash-body">
         <aside className="dash-sidebar" aria-label="Sections">
-          <p className="dash-nav-label">Navigation</p>
           <nav className="dash-nav" aria-label="Main">
             {navItems.map((item) => (
               <button
@@ -198,7 +203,19 @@ export default function LiveSurveillanceDashboard() {
         </aside>
 
         <div className="dash-main">
-          {nav !== "live" && (
+          {nav === "violations" && (
+            <ViolationLogsSection />
+          )}
+
+          {nav === "accidents" && (
+            <AccidentLogsSection />
+          )}
+
+          {nav === "challan" && (
+            <ChallanLogsSection />
+          )}
+
+          {nav !== "live" && nav !== "violations" && nav !== "accidents" && nav !== "challan" && (
             <div className="dash-placeholder card-glass">
               <h2 className="dash-placeholder-title">
                 {navItems.find((n) => n.key === nav)?.label}

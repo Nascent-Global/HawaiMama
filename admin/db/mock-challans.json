@@ -1,0 +1,142 @@
+[
+  {
+    "id": "1",
+    "ticket": {
+      "ticketNumber": "23434",
+      "issueDateBS": "2082-12-23",
+      "issueDateAD": "2026-04-02",
+      "time": "06:00:00"
+    },
+    "authority": {
+      "country": "Nepal",
+      "ministry": "Ministry of Home Affairs",
+      "office": "Traffic Police Office"
+    },
+    "owner": {
+      "fullName": "person",
+      "age": 27,
+      "address": "Bijaypur",
+      "contactNumber": "9800000000"
+    },
+    "vehicle": {
+      "registrationNumber": "ba 1 ja 2343",
+      "provinceCode": "Bagmati",
+      "vehicleType": "Motorcycle",
+      "model": "Pulsar 150",
+      "color": "Black"
+    },
+    "license": {
+      "licenseNumber": "01-06-00000000",
+      "category": "A",
+      "expiryDate": "2030-01-01"
+    },
+    "offense": {
+      "title": "riding bike without helmet",
+      "sectionCode": "130A",
+      "description": "Rider was completely ignoring safety protocols and didn't have a helmet.",
+      "fineAmount": 500,
+      "pointsDeducted": 0
+    },
+    "location": {
+      "place": "bijaypur",
+      "district": "Kaski",
+      "mapLink": "maps://343fr353343dfe",
+      "coordinates": {
+        "lat": 28.2096,
+        "lng": 83.9856
+      }
+    },
+    "officer": {
+      "name": "Ram Bahadur",
+      "rank": "Inspector",
+      "badgeNumber": "1203",
+      "signature": "RamB"
+    },
+    "payment": {
+      "status": "pending",
+      "method": "None",
+      "transactionId": "",
+      "paidAt": null
+    },
+    "evidence": {
+      "images": ["/images/violation1-1.jpg"],
+      "video": "/videos/violation1.mp4",
+      "notes": "Caught on AI surveillance"
+    },
+    "metadata": {
+      "createdAt": "2026-04-02T06:00:00Z",
+      "updatedAt": "2026-04-02T06:00:00Z",
+      "source": "ai-extracted"
+    }
+  },
+  {
+    "id": "2",
+    "ticket": {
+      "ticketNumber": "34323",
+      "issueDateBS": "2082-12-25",
+      "issueDateAD": "2026-04-04",
+      "time": "08:00:00"
+    },
+    "authority": {
+      "country": "Nepal",
+      "ministry": "Ministry of Home Affairs",
+      "office": "Traffic Police Office"
+    },
+    "owner": {
+      "fullName": "sam bahadur",
+      "age": 27,
+      "address": "Bijaypur",
+      "contactNumber": "9811111111"
+    },
+    "vehicle": {
+      "registrationNumber": "ba 1 ja 3432",
+      "provinceCode": "Bagmati",
+      "vehicleType": "Motorcycle",
+      "model": "Duke 200",
+      "color": "Orange"
+    },
+    "license": {
+      "licenseNumber": "01-06-11111111",
+      "category": "A",
+      "expiryDate": "2028-05-12"
+    },
+    "offense": {
+      "title": "crossing double lane",
+      "sectionCode": "142B",
+      "description": "Crossed solid double lane dangerously.",
+      "fineAmount": 2000,
+      "pointsDeducted": 1
+    },
+    "location": {
+      "place": "bijaypur",
+      "district": "Kaski",
+      "mapLink": "maps://343fr353343dfe",
+      "coordinates": {
+        "lat": 28.2096,
+        "lng": 83.9856
+      }
+    },
+    "officer": {
+      "name": "Shiva Thapa",
+      "rank": "Sub-Inspector",
+      "badgeNumber": "402",
+      "signature": "ShivaT"
+    },
+    "payment": {
+      "status": "pending",
+      "method": "None",
+      "transactionId": "",
+      "paidAt": null
+    },
+    "evidence": {
+      "images": ["/images/violation2-1.jpg"],
+      "video": "/videos/violation2.mp4",
+      "notes": "Captured crossing the lane."
+    },
+    "metadata": {
+      "createdAt": "2026-04-04T08:00:00Z",
+      "updatedAt": "2026-04-04T08:00:00Z",
+      "source": "ai-extracted"
+    }
+  }
+]

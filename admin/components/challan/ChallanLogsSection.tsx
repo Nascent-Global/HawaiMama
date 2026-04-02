@@ -4,6 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { ChallanLog } from '@/types/challan';
 import { getChallans } from '@/lib/api';
 
+function valueOrPlaceholder(value: string | null | undefined, fallback = 'Not captured') {
+  return value && value.trim() ? value : fallback;
+}
+
 const ChallanLogsSection: React.FC = () => {
   const [challans, setChallans] = useState<ChallanLog[]>([]);
   const [selected, setSelected] = useState<ChallanLog | null>(null);
@@ -49,14 +53,18 @@ const ChallanLogsSection: React.FC = () => {
                       <span className="text-sm text-gray-500">Age: {c.owner.age}</span>
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
-                      <a
-                        href={c.location.mapLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline"
-                      >
-                        {c.location.place}
-                      </a>
+                      {c.location.mapLink ? (
+                        <a
+                          href={c.location.mapLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          {valueOrPlaceholder(c.location.place)}
+                        </a>
+                      ) : (
+                        <span>{valueOrPlaceholder(c.location.place)}</span>
+                      )}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       challan id. {c.ticket.ticketNumber}
@@ -112,8 +120,12 @@ const ChallanLogsSection: React.FC = () => {
               {/* Header */}
               <div className="text-center mb-8 border-b-2 border-black pb-6 relative">
                 <h3 className="text-xl font-bold uppercase tracking-widest">{selected.authority.country}</h3>
-                <h4 className="text-lg font-bold">{selected.authority.ministry}</h4>
-                <h2 className="text-2xl font-black mt-2 underline">{selected.authority.office}</h2>
+                {selected.authority.ministry ? (
+                  <h4 className="text-lg font-bold">{selected.authority.ministry}</h4>
+                ) : null}
+                {selected.authority.office ? (
+                  <h2 className="text-2xl font-black mt-2 underline">{selected.authority.office}</h2>
+                ) : null}
                 <h1 className="text-3xl font-black mt-4 uppercase tracking-[0.2em] text-red-700">Challan Details</h1>
               </div>
 
@@ -143,14 +155,14 @@ const ChallanLogsSection: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2">
                   <div className="p-3 border-r border-b border-black">
                     <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-1">Offender Details</span>
-                    <div>Name: <span className="font-bold text-base">{selected.owner.fullName}</span></div>
-                    <div>Age: {selected.owner.age} &nbsp;&nbsp;|&nbsp;&nbsp; Contact: {selected.owner.contactNumber}</div>
-                    <div>Address: {selected.owner.address}</div>
+                    <div>Name: <span className="font-bold text-base">{valueOrPlaceholder(selected.owner.fullName)}</span></div>
+                    <div>Age: {selected.owner.age} &nbsp;&nbsp;|&nbsp;&nbsp; Contact: {valueOrPlaceholder(selected.owner.contactNumber)}</div>
+                    <div>Address: {valueOrPlaceholder(selected.owner.address)}</div>
                   </div>
                   <div className="p-3 border-b border-black">
                     <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-1">License Details</span>
-                    <div>License No: <span className="font-bold">{selected.license.licenseNumber}</span></div>
-                    <div>Category: {selected.license.category} &nbsp;&nbsp;|&nbsp;&nbsp; Expires: {selected.license.expiryDate}</div>
+                    <div>License No: <span className="font-bold">{valueOrPlaceholder(selected.license.licenseNumber)}</span></div>
+                    <div>Category: {valueOrPlaceholder(selected.license.category)} &nbsp;&nbsp;|&nbsp;&nbsp; Expires: {valueOrPlaceholder(selected.license.expiryDate)}</div>
                   </div>
                 </div>
 
@@ -158,9 +170,9 @@ const ChallanLogsSection: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 bg-gray-50/30">
                   <div className="p-3 border-r border-b border-black">
                     <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-1">Vehicle Details</span>
-                    <div>Reg. Number: <span className="font-bold text-lg">{selected.vehicle.registrationNumber}</span></div>
-                    <div>Type: {selected.vehicle.vehicleType} ({selected.vehicle.color})</div>
-                    <div>Model: {selected.vehicle.model}</div>
+                    <div>Reg. Number: <span className="font-bold text-lg">{valueOrPlaceholder(selected.vehicle.registrationNumber)}</span></div>
+                    <div>Type: {valueOrPlaceholder(selected.vehicle.vehicleType, 'Vehicle')} ({valueOrPlaceholder(selected.vehicle.color)})</div>
+                    <div>Model: {valueOrPlaceholder(selected.vehicle.model)}</div>
                   </div>
                   <div className="p-3 border-b border-black flex flex-col justify-center items-center">
                     <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Fine Amount (RS)</div>
@@ -179,22 +191,24 @@ const ChallanLogsSection: React.FC = () => {
                     <div className="mt-2 text-gray-800 bg-gray-100 p-2 italic border-l-4 border-gray-400">
                       &quot;{selected.offense.description}&quot;
                     </div>
-                    <div className="mt-3">Location: <strong>{selected.location.place}, {selected.location.district}</strong></div>
+                    <div className="mt-3">
+                      Location: <strong>{[selected.location.place, selected.location.district].filter((value) => value && value.trim()).join(', ') || 'Not captured'}</strong>
+                    </div>
                 </div>
 
                 {/* Officer Section */}
                 <div className="grid grid-cols-1 md:grid-cols-2">
                   <div className="p-4 border-r border-black">
                      <span className="font-bold mr-2 text-xs text-gray-500 uppercase tracking-wide block mb-2">Issuing Authority</span>
-                     <div>Officer Name: {selected.officer.name}</div>
-                     <div>Rank: {selected.officer.rank}</div>
-                     <div>Badge Number: {selected.officer.badgeNumber}</div>
+                     <div>Officer Name: {valueOrPlaceholder(selected.officer.name)}</div>
+                     <div>Rank: {valueOrPlaceholder(selected.officer.rank)}</div>
+                     <div>Badge Number: {valueOrPlaceholder(selected.officer.badgeNumber)}</div>
                   </div>
                   <div className="p-4 flex flex-col items-center justify-end relative h-32">
                      <div className="absolute right-8 top-4 opacity-10 border-4 border-black rounded-full w-24 h-24 flex items-center justify-center transform -rotate-12 pointer-events-none">
                        <span className="font-black text-xs text-center border-t border-b border-black py-1">OFFICIAL<br/>SEAL</span>
                      </div>
-                     <div className="italic text-2xl font-[signature] opacity-70 mb-2">{selected.officer.signature}</div>
+                     <div className="italic text-2xl font-[signature] opacity-70 mb-2">{selected.officer.signature || ''}</div>
                      <div className="w-48 border-t border-black border-dashed pt-1 text-center font-bold text-xs">OFFICER SIGNATURE</div>
                   </div>
                 </div>

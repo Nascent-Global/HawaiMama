@@ -43,8 +43,8 @@ export const ChallanSchema = z.object({
     district: z.string(),
     mapLink: z.string(),
     coordinates: z.object({
-      lat: z.number(),
-      lng: z.number(),
+      lat: z.number().nullable(),
+      lng: z.number().nullable(),
     }),
   }),
   officer: z.object({

@@ -67,7 +67,7 @@ def _build_camera_registry(root: Path) -> dict[str, dict[str, object]]:
             "id": camera_id,
             "source": str(video_path),
             "location": label,
-            "location_link": f"https://maps.google.com/?q={label.replace(' ', '+')}",
+            "location_link": None,
             "status": "online",
             "system_mode": "enforcement_mode",
         }
@@ -149,6 +149,79 @@ _SESSION_COOKIE_NAME = "hawaimama_session"
 class CameraConfigUpdate(BaseModel):
     system_mode: Literal["enforcement_mode", "traffic_management_mode"] | None = None
     location: str | None = None
+    frame_skip: int | None = None
+    resolution: tuple[int, int] | None = None
+    fps_limit: float | None = None
+    ocr_enabled: bool | None = None
+    ocr_debug: bool | None = None
+    intersection_id: str | None = None
+    lanes: list[str] | None = None
+    roi_config_path: str | None = None
+    confidence_threshold: float | None = None
+    plate_confidence_threshold: float | None = None
+    char_confidence_threshold: float | None = None
+    helmet_confidence_threshold: float | None = None
+    overspeed_threshold_kmh: float | None = None
+    line1_y: float | None = None
+    line2_y: float | None = None
+    line_distance_meters: float | None = None
+    line_tolerance_pixels: int | None = None
+    helmet_stability_frames: int | None = None
+    stop_speed_threshold_px: float | None = None
+    stop_frames_threshold: int | None = None
+    stop_line_distance_px: float | None = None
+    min_green_time: float | None = None
+    max_green_time: float | None = None
+    yellow_time: float | None = None
+    priority_queue_weight: float | None = None
+    priority_wait_weight: float | None = None
+    fairness_weight: float | None = None
+    max_priority_score: float | None = None
+    initial_active_lane: str | None = None
+
+
+def _camera_metadata_updates(update: CameraConfigUpdate) -> dict[str, object]:
+    return {
+        "frame_skip": update.frame_skip,
+        "resolution": list(update.resolution) if update.resolution is not None else None,
+        "fps_limit": update.fps_limit,
+        "ocr_enabled": update.ocr_enabled,
+        "ocr_debug": update.ocr_debug,
+        "intersection_id": (update.intersection_id or "").strip() or None,
+        "lanes": [lane.strip() for lane in update.lanes if lane.strip()] if update.lanes is not None else None,
+        "roi_config_path": (update.roi_config_path or "").strip() or None,
+        "confidence_threshold": update.confidence_threshold,
+        "plate_confidence_threshold": update.plate_confidence_threshold,
+        "char_confidence_threshold": update.char_confidence_threshold,
+        "helmet_confidence_threshold": update.helmet_confidence_threshold,
+        "overspeed_threshold_kmh": update.overspeed_threshold_kmh,
+        "line1_y": update.line1_y,
+        "line2_y": update.line2_y,
+        "line_distance_meters": update.line_distance_meters,
+        "line_tolerance_pixels": update.line_tolerance_pixels,
+        "helmet_stability_frames": update.helmet_stability_frames,
+        "stop_speed_threshold_px": update.stop_speed_threshold_px,
+        "stop_frames_threshold": update.stop_frames_threshold,
+        "stop_line_distance_px": update.stop_line_distance_px,
+        "min_green_time": update.min_green_time,
+        "max_green_time": update.max_green_time,
+        "yellow_time": update.yellow_time,
+        "priority_queue_weight": update.priority_queue_weight,
+        "priority_wait_weight": update.priority_wait_weight,
+        "fairness_weight": update.fairness_weight,
+        "max_priority_score": update.max_priority_score,
+        "initial_active_lane": (update.initial_active_lane or "").strip() or None,
+    }
+
+
+def _resolve_roi_config_path(config: TrafficMonitoringConfig, camera: dict[str, object]) -> Path:
+    roi_path = str(camera.get("roi_config_path") or "").strip()
+    if not roi_path:
+        return config.traffic_control.roi_config_path
+    candidate = Path(roi_path)
+    if candidate.is_absolute():
+        return candidate
+    return config.root / roi_path
 
 
 class LoginRequest(BaseModel):
@@ -451,16 +524,68 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
     speed = replace(
         config.speed,
         enabled=runtime_options.system_mode != "traffic_management_mode",
+        line1_y=float(camera.get("line1_y", config.speed.line1_y)),
+        line2_y=float(camera.get("line2_y", config.speed.line2_y)),
+        line_distance_meters=float(camera.get("line_distance_meters", config.speed.line_distance_meters)),
+        line_tolerance_pixels=int(camera.get("line_tolerance_pixels", config.speed.line_tolerance_pixels)),
+        overspeed_threshold_kmh=float(camera.get("overspeed_threshold_kmh", config.speed.overspeed_threshold_kmh)),
     )
     ocr = replace(
         config.ocr,
         enabled=bool(camera.get("ocr_enabled", config.ocr.enabled)),
+    )
+    detection = replace(
+        config.detection,
+        confidence_threshold=float(camera.get("confidence_threshold", config.detection.confidence_threshold)),
+        plate_confidence_threshold=float(
+            camera.get("plate_confidence_threshold", config.detection.plate_confidence_threshold)
+        ),
+        char_confidence_threshold=float(
+            camera.get("char_confidence_threshold", config.detection.char_confidence_threshold)
+        ),
+        helmet_confidence_threshold=float(
+            camera.get("helmet_confidence_threshold", config.detection.helmet_confidence_threshold)
+        ),
+        helmet_stability_frames=int(
+            camera.get("helmet_stability_frames", config.detection.helmet_stability_frames)
+        ),
+    )
+    traffic_control = replace(
+        config.traffic_control,
+        roi_config_path=_resolve_roi_config_path(config, camera),
+        stop_speed_threshold_px=float(
+            camera.get("stop_speed_threshold_px", config.traffic_control.stop_speed_threshold_px)
+        ),
+        stop_frames_threshold=int(
+            camera.get("stop_frames_threshold", config.traffic_control.stop_frames_threshold)
+        ),
+        stop_line_distance_px=float(
+            camera.get("stop_line_distance_px", config.traffic_control.stop_line_distance_px)
+        ),
+        min_green_time=float(camera.get("min_green_time", config.traffic_control.min_green_time)),
+        max_green_time=float(camera.get("max_green_time", config.traffic_control.max_green_time)),
+        yellow_time=float(camera.get("yellow_time", config.traffic_control.yellow_time)),
+        initial_active_lane=str(
+            camera.get("initial_active_lane", config.traffic_control.initial_active_lane)
+        ),
+        priority_queue_weight=float(
+            camera.get("priority_queue_weight", config.traffic_control.priority_queue_weight)
+        ),
+        priority_wait_weight=float(
+            camera.get("priority_wait_weight", config.traffic_control.priority_wait_weight)
+        ),
+        fairness_weight=float(camera.get("fairness_weight", config.traffic_control.fairness_weight)),
+        max_priority_score=float(
+            camera.get("max_priority_score", config.traffic_control.max_priority_score)
+        ),
     )
     config = replace(
         config,
         runtime=runtime,
         runtime_options=runtime_options,
         performance=performance,
+        traffic_control=traffic_control,
+        detection=detection,
         speed=speed,
         ocr=ocr,
     )
@@ -474,23 +599,48 @@ def _intersection_signal_machine(intersection_id: str) -> SignalStateMachine:
 
     config = build_default_config()
     lane_order: list[str] = []
+    seed_camera: dict[str, object] | None = None
     for camera in cameras.values():
         if camera.get("intersection_id") != intersection_id:
             continue
+        if seed_camera is None:
+            seed_camera = camera
         for lane in camera.get("lanes", []):
             if lane not in lane_order:
                 lane_order.append(lane)
 
+    traffic_control = config.traffic_control
+    if seed_camera is not None:
+        traffic_control = replace(
+            traffic_control,
+            initial_active_lane=str(
+                seed_camera.get("initial_active_lane", traffic_control.initial_active_lane)
+            ),
+            min_green_time=float(seed_camera.get("min_green_time", traffic_control.min_green_time)),
+            max_green_time=float(seed_camera.get("max_green_time", traffic_control.max_green_time)),
+            yellow_time=float(seed_camera.get("yellow_time", traffic_control.yellow_time)),
+            priority_queue_weight=float(
+                seed_camera.get("priority_queue_weight", traffic_control.priority_queue_weight)
+            ),
+            priority_wait_weight=float(
+                seed_camera.get("priority_wait_weight", traffic_control.priority_wait_weight)
+            ),
+            fairness_weight=float(seed_camera.get("fairness_weight", traffic_control.fairness_weight)),
+            max_priority_score=float(
+                seed_camera.get("max_priority_score", traffic_control.max_priority_score)
+            ),
+        )
+
     machine = SignalStateMachine(
-        lane_order or [config.traffic_control.initial_active_lane],
-        initial_active_lane=config.traffic_control.initial_active_lane,
-        min_green_time=config.traffic_control.min_green_time,
-        max_green_time=config.traffic_control.max_green_time,
-        yellow_time=config.traffic_control.yellow_time,
-        priority_queue_weight=config.traffic_control.priority_queue_weight,
-        priority_wait_weight=config.traffic_control.priority_wait_weight,
-        fairness_weight=config.traffic_control.fairness_weight,
-        max_priority_score=config.traffic_control.max_priority_score,
+        lane_order or [traffic_control.initial_active_lane],
+        initial_active_lane=traffic_control.initial_active_lane,
+        min_green_time=traffic_control.min_green_time,
+        max_green_time=traffic_control.max_green_time,
+        yellow_time=traffic_control.yellow_time,
+        priority_queue_weight=traffic_control.priority_queue_weight,
+        priority_wait_weight=traffic_control.priority_wait_weight,
+        fairness_weight=traffic_control.fairness_weight,
+        max_priority_score=traffic_control.max_priority_score,
     )
     _intersection_signal_machines[intersection_id] = machine
     return machine
@@ -710,12 +860,12 @@ def _save_violation_clip(
         )
 
 
-def _camera_location_link(camera_id: str) -> str:
+def _camera_location_link(camera_id: str) -> str | None:
     camera = cameras.get(camera_id, {})
-    return str(
-        camera.get("location_link")
-        or f"https://maps.google.com/?q={_camera_location(camera_id).replace(' ', '+')}"
-    )
+    location_link = camera.get("location_link")
+    if not location_link:
+        return None
+    return str(location_link)
 
 
 def _owner_snapshot(*, camera_id: str, track, seed: str) -> dict[str, object]:
@@ -782,7 +932,7 @@ def _build_violation_record(
         "tempAddress": owner_address,
         "permAddress": owner_address,
         "timestamp": timestamp,
-        "locationLink": _camera_location_link(camera_id),
+        "locationLink": _camera_location_link(camera_id) or "",
         "screenshot1Url": image_path or "",
         "screenshot2Url": "",
         "screenshot3Url": "",
@@ -1049,15 +1199,12 @@ def update_camera_config(camera_id: str, update: CameraConfigUpdate, request: Re
         camera_id,
         system_mode=update.system_mode,
         location=update.location,
+        metadata_updates=_camera_metadata_updates(update),
     )
     if camera is None:
         raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
     if camera_id in cameras:
-        cameras[camera_id]["location"] = camera["location"]
-        cameras[camera_id]["status"] = camera["status"]
-        cameras[camera_id]["system_mode"] = camera["system_mode"]
-        cameras[camera_id]["source"] = camera["source"]
-        cameras[camera_id]["location_link"] = camera["location_link"]
+        cameras[camera_id].update(camera)
     return JSONResponse(camera)
 
 
@@ -1104,11 +1251,7 @@ async def create_camera_config(
     if camera is None:
         raise HTTPException(status_code=500, detail="Feed was uploaded but registry update failed")
     if camera_id in cameras:
-        cameras[camera_id]["location"] = camera["location"]
-        cameras[camera_id]["status"] = camera["status"]
-        cameras[camera_id]["system_mode"] = camera["system_mode"]
-        cameras[camera_id]["source"] = camera["source"]
-        cameras[camera_id]["location_link"] = camera["location_link"]
+        cameras[camera_id].update(camera)
     return JSONResponse(camera)
 
 

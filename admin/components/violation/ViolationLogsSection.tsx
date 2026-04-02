@@ -91,14 +91,18 @@ const ViolationLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = f
                         </span>
                       </div>
                       <div className="text-xs text-gray-500">
-                        <a
-                          href={v.locationLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline"
-                        >
-                          {v.tempAddress}
-                        </a>
+                        {v.locationLink ? (
+                          <a
+                            href={v.locationLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline"
+                          >
+                            {v.tempAddress}
+                          </a>
+                        ) : (
+                          <span>{v.tempAddress}</span>
+                        )}
                       </div>
                       <div className="text-sm font-medium mt-1">{v.title}</div>
                       <div className="text-xs text-gray-400">
@@ -252,14 +256,16 @@ const ViolationLogsSection: React.FC<{ canVerify?: boolean }> = ({ canVerify = f
               )}
               <div className="mb-4 text-gray-700">{selected.description}</div>
               <div className="flex items-center space-x-4">
-                <a
-                  href={selected.locationLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 underline"
-                >
-                  View on Map
-                </a>
+                {selected.locationLink ? (
+                  <a
+                    href={selected.locationLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 underline"
+                  >
+                    View on Map
+                  </a>
+                ) : null}
                 {!selected.verified && canVerify && (
                   <button
                     className="px-4 py-2 bg-[#3B82F6] text-white rounded font-medium hover:bg-blue-700"

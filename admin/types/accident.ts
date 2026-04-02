@@ -11,7 +11,7 @@ export const AccidentLogSchema = z.object({
   tempAddress: z.string(),
   permAddress: z.string(),
   timestamp: z.string(),
-  locationLink: z.string(),
+  locationLink: z.string().optional().default(""),
   screenshot1Url: z.string(),
   screenshot2Url: z.string(),
   screenshot3Url: z.string(),

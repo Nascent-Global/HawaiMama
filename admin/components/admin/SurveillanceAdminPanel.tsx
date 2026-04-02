@@ -19,6 +19,36 @@ import type { SurveillanceCameraConfig } from "@/types/camera-config";
 type CameraDraft = {
   location: string;
   system_mode: SurveillanceCameraConfig["system_mode"];
+  frame_skip: string;
+  resolution_width: string;
+  resolution_height: string;
+  fps_limit: string;
+  ocr_enabled: boolean;
+  ocr_debug: boolean;
+  intersection_id: string;
+  lanes_text: string;
+  roi_config_path: string;
+  confidence_threshold: string;
+  plate_confidence_threshold: string;
+  char_confidence_threshold: string;
+  helmet_confidence_threshold: string;
+  overspeed_threshold_kmh: string;
+  line1_y: string;
+  line2_y: string;
+  line_distance_meters: string;
+  line_tolerance_pixels: string;
+  helmet_stability_frames: string;
+  stop_speed_threshold_px: string;
+  stop_frames_threshold: string;
+  stop_line_distance_px: string;
+  min_green_time: string;
+  max_green_time: string;
+  yellow_time: string;
+  priority_queue_weight: string;
+  priority_wait_weight: string;
+  fairness_weight: string;
+  max_priority_score: string;
+  initial_active_lane: string;
 };
 
 type Drafts = Record<string, CameraDraft>;
@@ -97,12 +127,153 @@ function createDrafts(cameras: SurveillanceCameraConfig[]): Drafts {
   return Object.fromEntries(
     cameras.map((camera) => [
       camera.id,
-      {
-        location: camera.location,
-        system_mode: camera.system_mode,
-      },
+      createCameraDraft(camera),
     ]),
   );
+}
+
+function createEmptyCameraDraft(): CameraDraft {
+  return {
+    location: "",
+    system_mode: "enforcement_mode",
+    frame_skip: "",
+    resolution_width: "",
+    resolution_height: "",
+    fps_limit: "",
+    ocr_enabled: true,
+    ocr_debug: false,
+    intersection_id: "",
+    lanes_text: "",
+    roi_config_path: "",
+    confidence_threshold: "",
+    plate_confidence_threshold: "",
+    char_confidence_threshold: "",
+    helmet_confidence_threshold: "",
+    overspeed_threshold_kmh: "",
+    line1_y: "",
+    line2_y: "",
+    line_distance_meters: "",
+    line_tolerance_pixels: "",
+    helmet_stability_frames: "",
+    stop_speed_threshold_px: "",
+    stop_frames_threshold: "",
+    stop_line_distance_px: "",
+    min_green_time: "",
+    max_green_time: "",
+    yellow_time: "",
+    priority_queue_weight: "",
+    priority_wait_weight: "",
+    fairness_weight: "",
+    max_priority_score: "",
+    initial_active_lane: "",
+  };
+}
+
+function optionalText(value: string | number | null | undefined): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function createCameraDraft(camera: SurveillanceCameraConfig): CameraDraft {
+  return {
+    location: camera.location,
+    system_mode: camera.system_mode,
+    frame_skip: optionalText(camera.frame_skip),
+    resolution_width: optionalText(camera.resolution?.[0]),
+    resolution_height: optionalText(camera.resolution?.[1]),
+    fps_limit: optionalText(camera.fps_limit),
+    ocr_enabled: camera.ocr_enabled ?? true,
+    ocr_debug: camera.ocr_debug ?? false,
+    intersection_id: camera.intersection_id ?? "",
+    lanes_text: (camera.lanes ?? []).join(", "),
+    roi_config_path: camera.roi_config_path ?? "",
+    confidence_threshold: optionalText(camera.confidence_threshold),
+    plate_confidence_threshold: optionalText(camera.plate_confidence_threshold),
+    char_confidence_threshold: optionalText(camera.char_confidence_threshold),
+    helmet_confidence_threshold: optionalText(camera.helmet_confidence_threshold),
+    overspeed_threshold_kmh: optionalText(camera.overspeed_threshold_kmh),
+    line1_y: optionalText(camera.line1_y),
+    line2_y: optionalText(camera.line2_y),
+    line_distance_meters: optionalText(camera.line_distance_meters),
+    line_tolerance_pixels: optionalText(camera.line_tolerance_pixels),
+    helmet_stability_frames: optionalText(camera.helmet_stability_frames),
+    stop_speed_threshold_px: optionalText(camera.stop_speed_threshold_px),
+    stop_frames_threshold: optionalText(camera.stop_frames_threshold),
+    stop_line_distance_px: optionalText(camera.stop_line_distance_px),
+    min_green_time: optionalText(camera.min_green_time),
+    max_green_time: optionalText(camera.max_green_time),
+    yellow_time: optionalText(camera.yellow_time),
+    priority_queue_weight: optionalText(camera.priority_queue_weight),
+    priority_wait_weight: optionalText(camera.priority_wait_weight),
+    fairness_weight: optionalText(camera.fairness_weight),
+    max_priority_score: optionalText(camera.max_priority_score),
+    initial_active_lane: camera.initial_active_lane ?? "",
+  };
+}
+
+function parseOptionalNumber(value: string): number | null {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseOptionalInteger(value: string): number | null {
+  const parsed = parseOptionalNumber(value);
+  return parsed === null ? null : Math.trunc(parsed);
+}
+
+function normalizeLaneList(value: string): string[] {
+  return value
+    .split(",")
+    .map((lane) => lane.trim())
+    .filter(Boolean);
+}
+
+function buildCameraUpdatePayload(draft: CameraDraft) {
+  const width = parseOptionalInteger(draft.resolution_width);
+  const height = parseOptionalInteger(draft.resolution_height);
+  return {
+    location: draft.location.trim(),
+    system_mode: draft.system_mode,
+    frame_skip: parseOptionalInteger(draft.frame_skip),
+    resolution: width !== null && height !== null ? ([width, height] as [number, number]) : null,
+    fps_limit: parseOptionalNumber(draft.fps_limit),
+    ocr_enabled: draft.ocr_enabled,
+    ocr_debug: draft.ocr_debug,
+    intersection_id: draft.intersection_id.trim() || null,
+    lanes: normalizeLaneList(draft.lanes_text),
+    roi_config_path: draft.roi_config_path.trim() || null,
+    confidence_threshold: parseOptionalNumber(draft.confidence_threshold),
+    plate_confidence_threshold: parseOptionalNumber(draft.plate_confidence_threshold),
+    char_confidence_threshold: parseOptionalNumber(draft.char_confidence_threshold),
+    helmet_confidence_threshold: parseOptionalNumber(draft.helmet_confidence_threshold),
+    overspeed_threshold_kmh: parseOptionalNumber(draft.overspeed_threshold_kmh),
+    line1_y: parseOptionalNumber(draft.line1_y),
+    line2_y: parseOptionalNumber(draft.line2_y),
+    line_distance_meters: parseOptionalNumber(draft.line_distance_meters),
+    line_tolerance_pixels: parseOptionalInteger(draft.line_tolerance_pixels),
+    helmet_stability_frames: parseOptionalInteger(draft.helmet_stability_frames),
+    stop_speed_threshold_px: parseOptionalNumber(draft.stop_speed_threshold_px),
+    stop_frames_threshold: parseOptionalInteger(draft.stop_frames_threshold),
+    stop_line_distance_px: parseOptionalNumber(draft.stop_line_distance_px),
+    min_green_time: parseOptionalNumber(draft.min_green_time),
+    max_green_time: parseOptionalNumber(draft.max_green_time),
+    yellow_time: parseOptionalNumber(draft.yellow_time),
+    priority_queue_weight: parseOptionalNumber(draft.priority_queue_weight),
+    priority_wait_weight: parseOptionalNumber(draft.priority_wait_weight),
+    fairness_weight: parseOptionalNumber(draft.fairness_weight),
+    max_priority_score: parseOptionalNumber(draft.max_priority_score),
+    initial_active_lane: draft.initial_active_lane.trim() || null,
+  };
+}
+
+function isCameraDraftDirty(camera: SurveillanceCameraConfig, draft: CameraDraft | undefined): boolean {
+  if (!draft) {
+    return false;
+  }
+  return JSON.stringify(draft) !== JSON.stringify(createCameraDraft(camera));
 }
 
 function createAdminDrafts(accounts: AdminAccount[]): Record<string, AdminDraft> {
@@ -252,7 +423,7 @@ export default function SurveillanceAdminPanel() {
   const visibleCameras = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
     return cameras.filter((camera) => {
-      const draft = drafts[camera.id] ?? { location: camera.location, system_mode: camera.system_mode };
+      const draft = drafts[camera.id] ?? createCameraDraft(camera);
       const matchesMode = modeFilter === "all" || draft.system_mode === modeFilter;
       const haystack = [camera.id, draft.location, camera.file_name, camera.address].join(" ").toLowerCase();
       return matchesMode && (!query || haystack.includes(query));
@@ -268,10 +439,7 @@ export default function SurveillanceAdminPanel() {
     () =>
       cameras.reduce((count, camera) => {
         const draft = drafts[camera.id];
-        if (!draft) {
-          return count;
-        }
-        return draft.location !== camera.location || draft.system_mode !== camera.system_mode ? count + 1 : count;
+        return isCameraDraftDirty(camera, draft) ? count + 1 : count;
       }, 0),
     [cameras, drafts],
   );
@@ -286,14 +454,14 @@ export default function SurveillanceAdminPanel() {
     [cameras],
   );
 
-  const handleDraftChange = (cameraId: string, field: keyof CameraDraft, value: string) => {
+  const handleDraftChange = <K extends keyof CameraDraft>(cameraId: string, field: K, value: CameraDraft[K]) => {
     setSavedId((current) => (current === cameraId ? null : current));
     setDrafts((current) => ({
       ...current,
       [cameraId]: {
-        ...(current[cameraId] ?? { location: "", system_mode: "enforcement_mode" }),
+        ...(current[cameraId] ?? createEmptyCameraDraft()),
         [field]: value,
-      } as CameraDraft,
+      },
     }));
   };
 
@@ -301,10 +469,7 @@ export default function SurveillanceAdminPanel() {
     setSavedId((current) => (current === camera.id ? null : current));
     setDrafts((current) => ({
       ...current,
-      [camera.id]: {
-        location: camera.location,
-        system_mode: camera.system_mode,
-      },
+      [camera.id]: createCameraDraft(camera),
     }));
   };
 
@@ -317,14 +482,11 @@ export default function SurveillanceAdminPanel() {
       setSavingId(cameraId);
       setSavedId(null);
       setError(null);
-      const updated = await updateCameraConfig(cameraId, draft);
+      const updated = await updateCameraConfig(cameraId, buildCameraUpdatePayload(draft));
       setCameras((current) => current.map((camera) => (camera.id === cameraId ? updated : camera)));
       setDrafts((current) => ({
         ...current,
-        [cameraId]: {
-          location: updated.location,
-          system_mode: updated.system_mode,
-        },
+        [cameraId]: createCameraDraft(updated),
       }));
       setSavedId(cameraId);
     } catch (saveError) {
@@ -989,8 +1151,8 @@ export default function SurveillanceAdminPanel() {
           {!isLoading && visibleCameras.length > 0 ? (
             <div className="admin-feed-grid">
               {visibleCameras.map((camera) => {
-                const draft = drafts[camera.id] ?? { location: camera.location, system_mode: camera.system_mode };
-                const isDirty = draft.location !== camera.location || draft.system_mode !== camera.system_mode;
+                const draft = drafts[camera.id] ?? createCameraDraft(camera);
+                const isDirty = isCameraDraftDirty(camera, draft);
                 const isSaving = savingId === camera.id;
                 const isRemoving = removingId === camera.id;
                 const isSaved = savedId === camera.id && !isDirty;
@@ -1059,6 +1221,316 @@ export default function SurveillanceAdminPanel() {
                               </button>
                             );
                           })}
+                        </div>
+                      </div>
+
+                      <div className="admin-field">
+                        <span className="admin-field-label">Shared runtime tuning</span>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <label className="admin-field">
+                            <span className="admin-field-label">Frame skip</span>
+                            <input
+                              value={draft.frame_skip}
+                              onChange={(event) => handleDraftChange(camera.id, "frame_skip", event.target.value)}
+                              className="admin-input"
+                              placeholder="1"
+                              inputMode="numeric"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">FPS limit</span>
+                            <input
+                              value={draft.fps_limit}
+                              onChange={(event) => handleDraftChange(camera.id, "fps_limit", event.target.value)}
+                              className="admin-input"
+                              placeholder="12"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Resolution width</span>
+                            <input
+                              value={draft.resolution_width}
+                              onChange={(event) => handleDraftChange(camera.id, "resolution_width", event.target.value)}
+                              className="admin-input"
+                              placeholder="1280"
+                              inputMode="numeric"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Resolution height</span>
+                            <input
+                              value={draft.resolution_height}
+                              onChange={(event) => handleDraftChange(camera.id, "resolution_height", event.target.value)}
+                              className="admin-input"
+                              placeholder="720"
+                              inputMode="numeric"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">ROI config path</span>
+                            <input
+                              value={draft.roi_config_path}
+                              onChange={(event) => handleDraftChange(camera.id, "roi_config_path", event.target.value)}
+                              className="admin-input"
+                              placeholder="config/approach_rois_input6.json"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Intersection ID</span>
+                            <input
+                              value={draft.intersection_id}
+                              onChange={(event) => handleDraftChange(camera.id, "intersection_id", event.target.value)}
+                              className="admin-input"
+                              placeholder="lakeside-main"
+                            />
+                          </label>
+                          <label className="admin-field md:col-span-2">
+                            <span className="admin-field-label">Lane names</span>
+                            <input
+                              value={draft.lanes_text}
+                              onChange={(event) => handleDraftChange(camera.id, "lanes_text", event.target.value)}
+                              className="admin-input"
+                              placeholder="north, south, east, west"
+                            />
+                          </label>
+                          <label className="auth-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={draft.ocr_enabled}
+                              onChange={(event) => handleDraftChange(camera.id, "ocr_enabled", event.target.checked)}
+                            />
+                            <span>Enable OCR</span>
+                          </label>
+                          <label className="auth-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={draft.ocr_debug}
+                              onChange={(event) => handleDraftChange(camera.id, "ocr_debug", event.target.checked)}
+                            />
+                            <span>OCR debug</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="admin-field">
+                        <span className="admin-field-label">Enforcement tuning</span>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <label className="admin-field">
+                            <span className="admin-field-label">Detector confidence</span>
+                            <input
+                              value={draft.confidence_threshold}
+                              onChange={(event) => handleDraftChange(camera.id, "confidence_threshold", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.25"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Plate confidence</span>
+                            <input
+                              value={draft.plate_confidence_threshold}
+                              onChange={(event) => handleDraftChange(camera.id, "plate_confidence_threshold", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.25"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Character confidence</span>
+                            <input
+                              value={draft.char_confidence_threshold}
+                              onChange={(event) => handleDraftChange(camera.id, "char_confidence_threshold", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.20"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Helmet confidence</span>
+                            <input
+                              value={draft.helmet_confidence_threshold}
+                              onChange={(event) => handleDraftChange(camera.id, "helmet_confidence_threshold", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.30"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Overspeed threshold km/h</span>
+                            <input
+                              value={draft.overspeed_threshold_kmh}
+                              onChange={(event) => handleDraftChange(camera.id, "overspeed_threshold_kmh", event.target.value)}
+                              className="admin-input"
+                              placeholder="60"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Helmet stability frames</span>
+                            <input
+                              value={draft.helmet_stability_frames}
+                              onChange={(event) => handleDraftChange(camera.id, "helmet_stability_frames", event.target.value)}
+                              className="admin-input"
+                              placeholder="5"
+                              inputMode="numeric"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Speed line 1 Y</span>
+                            <input
+                              value={draft.line1_y}
+                              onChange={(event) => handleDraftChange(camera.id, "line1_y", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.50"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Speed line 2 Y</span>
+                            <input
+                              value={draft.line2_y}
+                              onChange={(event) => handleDraftChange(camera.id, "line2_y", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.70"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Line distance meters</span>
+                            <input
+                              value={draft.line_distance_meters}
+                              onChange={(event) => handleDraftChange(camera.id, "line_distance_meters", event.target.value)}
+                              className="admin-input"
+                              placeholder="12"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Line tolerance px</span>
+                            <input
+                              value={draft.line_tolerance_pixels}
+                              onChange={(event) => handleDraftChange(camera.id, "line_tolerance_pixels", event.target.value)}
+                              className="admin-input"
+                              placeholder="15"
+                              inputMode="numeric"
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="admin-field">
+                        <span className="admin-field-label">Traffic management tuning</span>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <label className="admin-field">
+                            <span className="admin-field-label">Stop speed threshold px</span>
+                            <input
+                              value={draft.stop_speed_threshold_px}
+                              onChange={(event) => handleDraftChange(camera.id, "stop_speed_threshold_px", event.target.value)}
+                              className="admin-input"
+                              placeholder="2.0"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Stop frames threshold</span>
+                            <input
+                              value={draft.stop_frames_threshold}
+                              onChange={(event) => handleDraftChange(camera.id, "stop_frames_threshold", event.target.value)}
+                              className="admin-input"
+                              placeholder="5"
+                              inputMode="numeric"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Stop line distance px</span>
+                            <input
+                              value={draft.stop_line_distance_px}
+                              onChange={(event) => handleDraftChange(camera.id, "stop_line_distance_px", event.target.value)}
+                              className="admin-input"
+                              placeholder="80"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Initial active lane</span>
+                            <input
+                              value={draft.initial_active_lane}
+                              onChange={(event) => handleDraftChange(camera.id, "initial_active_lane", event.target.value)}
+                              className="admin-input"
+                              placeholder="north"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Min green time</span>
+                            <input
+                              value={draft.min_green_time}
+                              onChange={(event) => handleDraftChange(camera.id, "min_green_time", event.target.value)}
+                              className="admin-input"
+                              placeholder="10"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Max green time</span>
+                            <input
+                              value={draft.max_green_time}
+                              onChange={(event) => handleDraftChange(camera.id, "max_green_time", event.target.value)}
+                              className="admin-input"
+                              placeholder="25"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Yellow time</span>
+                            <input
+                              value={draft.yellow_time}
+                              onChange={(event) => handleDraftChange(camera.id, "yellow_time", event.target.value)}
+                              className="admin-input"
+                              placeholder="3"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Queue weight</span>
+                            <input
+                              value={draft.priority_queue_weight}
+                              onChange={(event) => handleDraftChange(camera.id, "priority_queue_weight", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.7"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Wait weight</span>
+                            <input
+                              value={draft.priority_wait_weight}
+                              onChange={(event) => handleDraftChange(camera.id, "priority_wait_weight", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.3"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Fairness weight</span>
+                            <input
+                              value={draft.fairness_weight}
+                              onChange={(event) => handleDraftChange(camera.id, "fairness_weight", event.target.value)}
+                              className="admin-input"
+                              placeholder="0.1"
+                              inputMode="decimal"
+                            />
+                          </label>
+                          <label className="admin-field">
+                            <span className="admin-field-label">Max priority score</span>
+                            <input
+                              value={draft.max_priority_score}
+                              onChange={(event) => handleDraftChange(camera.id, "max_priority_score", event.target.value)}
+                              className="admin-input"
+                              placeholder="100"
+                              inputMode="decimal"
+                            />
+                          </label>
                         </div>
                       </div>
 

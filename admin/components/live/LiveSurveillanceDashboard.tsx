@@ -169,10 +169,10 @@ function FeedCard({
         <footer className="feed-footer">
           <div className="feed-meta">
             <p className="feed-address">{feed.address}</p>
-            {feed.location.startsWith("http") ? (
+            {feed.locationLink ? (
               <a
                 className="feed-location-link"
-                href={feed.location}
+                href={feed.locationLink}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(event) => event.stopPropagation()}
@@ -212,10 +212,10 @@ function FeedDetail({
       </div>
       <footer className="feed-detail-footer">
         <p className="feed-detail-address">{feed.address}</p>
-        {feed.location.startsWith("http") ? (
+        {feed.locationLink ? (
           <a
             className="feed-detail-location"
-            href={feed.location}
+            href={feed.locationLink}
             target="_blank"
             rel="noopener noreferrer"
           >

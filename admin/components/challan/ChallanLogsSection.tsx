@@ -1,19 +1,19 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import mockChallans from '@/db/mock-challans.json';
 import { ChallanLog } from '@/types/challan';
+import { getChallans } from '@/app/actions/logs';
 
 const ChallanLogsSection: React.FC = () => {
   const [challans, setChallans] = useState<ChallanLog[]>([]);
   const [selected, setSelected] = useState<ChallanLog | null>(null);
 
   useEffect(() => {
-    setChallans(
-      (mockChallans as unknown as ChallanLog[]).sort(
-        (a, b) => new Date(b.metadata.createdAt).getTime() - new Date(a.metadata.createdAt).getTime()
-      )
-    );
+    async function load() {
+      const data = await getChallans();
+      setChallans(data as unknown as ChallanLog[]);
+    }
+    load();
   }, []);
 
   return (

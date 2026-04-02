@@ -7,13 +7,117 @@ generator client {
   provider = "prisma-client-js"
 }
 
-model Violation {
-  id          Int      @id @default(autoincrement())
-  plateNumber String
-  type        String
-  location    String
-  timestamp   DateTime @default(now())
-  imageUrl    String?
-  videoUrl    String?
-  status      String   @default("pending")
+model ViolationLog {
+  id             String   @id @default(uuid())
+  title          String
+  driverName     String
+  age            Int
+  dob            DateTime
+  bloodGroup     String
+  licensePlate   String
+  tempAddress    String
+  permAddress    String
+  timestamp      DateTime
+  locationLink   String
+  screenshot1Url String
+  screenshot2Url String
+  screenshot3Url String
+  videoUrl       String
+  description    String
+  verified       Boolean  @default(false)
+  
+  @@map("violation_logs")
+}
+
+model AccidentLog {
+  id             String   @id @default(uuid())
+  title          String
+  driverName     String
+  age            Int
+  dob            DateTime
+  bloodGroup     String
+  licensePlate   String
+  tempAddress    String
+  permAddress    String
+  timestamp      DateTime
+  locationLink   String
+  screenshot1Url String
+  screenshot2Url String
+  screenshot3Url String
+  videoUrl       String
+  description    String
+  verified       Boolean  @default(false)
+
+  @@map("accident_logs")
+}
+
+model ChallanLog {
+  id                 String   @id @default(uuid())
+
+  // Ticket Info
+  ticketNumber       String
+  issueDateBS        String
+  issueDateAD        String
+  time               String
+
+  // Authority
+  authorityCountry   String
+  authorityMinistry  String
+  authorityOffice    String
+
+  // Owner Info
+  ownerFullName      String
+  ownerAge           Int
+  ownerAddress       String
+  ownerContactNumber String
+
+  // Vehicle Info
+  vehicleRegNo       String
+  vehicleProvince    String
+  vehicleType        String
+  vehicleModel       String
+  vehicleColor       String
+
+  // License Info
+  licenseNo          String
+  licenseCategory    String
+  licenseExpiry      String
+
+  // Offense Info
+  offenseTitle       String
+  offenseSection     String
+  offenseDescription String
+  fineAmount         Int
+  pointsDeducted     Int
+
+  // Location Info
+  locationPlace      String
+  locationDistrict   String
+  locationMapLink    String
+  locationLat        Float
+  locationLng        Float
+
+  // Officer Info
+  officerName        String
+  officerRank        String
+  officerBadge       String
+  officerSignature   String
+
+  // Payment Info
+  paymentStatus      String
+  paymentMethod      String
+  paymentTxId        String
+  paymentPaidAt      String?
+
+  // Evidence
+  evidenceImages     Json     // String[]
+  evidenceVideo      String
+  evidenceNotes      String
+
+  // Metadata
+  metaCreatedAt      String
+  metaUpdatedAt      String
+  metaSource         String
+
+  @@map("challan_logs")
 }

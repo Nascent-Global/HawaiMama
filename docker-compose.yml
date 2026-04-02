@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hawaimama-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hawaimama}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hawaimama_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-hawaimama}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

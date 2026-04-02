@@ -1,22 +1,23 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import mockAccidents from '@/db/mock-accidents.json';
 import { AccidentLog } from '@/types/accident';
+import { getAccidents, verifyAccident } from '@/app/actions/logs';
 
 const AccidentLogsSection: React.FC = () => {
   const [accidents, setAccidents] = useState<AccidentLog[]>([]);
   const [selected, setSelected] = useState<AccidentLog | null>(null);
 
   useEffect(() => {
-    setAccidents(
-      (mockAccidents as AccidentLog[]).sort(
-        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      )
-    );
+    async function load() {
+      const data = await getAccidents();
+      setAccidents(data.map((a: any) => ({...a, dob: a.dob.toISOString(), timestamp: a.timestamp.toISOString() })) as unknown as AccidentLog[]);
+    }
+    load();
   }, []);
 
-  const handleVerify = (id: string) => {
+  const handleVerify = async (id: string) => {
+    await verifyAccident(id);
     setAccidents((prev) =>
       prev.map((v) => (v.id === id ? { ...v, verified: true } : v))
     );

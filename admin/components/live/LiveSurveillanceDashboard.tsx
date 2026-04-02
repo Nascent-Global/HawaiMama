@@ -46,7 +46,13 @@ function FeedCard({
 }) {
   return (
     <article className="feed-card">
-      <button type="button" className="feed-card-inner" onClick={onOpen}>
+      <div 
+        role="button" 
+        tabIndex={0} 
+        className="feed-card-inner" 
+        onClick={onOpen}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(); }}
+      >
         <div className="feed-video-wrap">
           <span className="feed-live-dot" title="Live" />
           <video
@@ -84,7 +90,7 @@ function FeedCard({
             &lt; &gt;
           </span>
         </footer>
-      </button>
+      </div>
     </article>
   );
 }

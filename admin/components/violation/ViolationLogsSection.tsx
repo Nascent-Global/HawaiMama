@@ -1,22 +1,24 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import mockViolations from '@/db/mock-violations.json';
 import { ViolationLog } from '@/types/violation';
+import { getViolations, verifyViolation } from '@/app/actions/logs';
 
 const ViolationLogsSection: React.FC = () => {
   const [violations, setViolations] = useState<ViolationLog[]>([]);
   const [selected, setSelected] = useState<ViolationLog | null>(null);
 
   useEffect(() => {
-    setViolations(
-      (mockViolations as ViolationLog[]).sort(
-        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      )
-    );
+    async function load() {
+      const data = await getViolations();
+      // Server passes dates as Dates, we could keep it simple.
+      setViolations(data.map((v: any) => ({...v, dob: v.dob.toISOString(), timestamp: v.timestamp.toISOString() })) as unknown as ViolationLog[]);
+    }
+    load();
   }, []);
 
-  const handleVerify = (id: string) => {
+  const handleVerify = async (id: string) => {
+    await verifyViolation(id);
     setViolations((prev) =>
       prev.map((v) => (v.id === id ? { ...v, verified: true } : v))
     );

@@ -45,6 +45,12 @@ class TrafficMonitoringPipeline:
         self.enforcement_enabled = self.system_mode == "enforcement_mode"
         plate_detector_path = config.models.plate_detector
         plate_enabled = self.enforcement_enabled and plate_detector_path.exists()
+        char_detector_path = config.models.char_detector
+        char_enabled = (
+            self.enforcement_enabled
+            and char_detector_path is not None
+            and char_detector_path.exists()
+        )
         helmet_enabled = self.enforcement_enabled and config.models.helmet_detector.exists()
         face_enabled = (
             self.enforcement_enabled
@@ -60,6 +66,14 @@ class TrafficMonitoringPipeline:
                 confidence=config.detection.plate_confidence_threshold,
             )
             if plate_enabled
+            else None
+        )
+        self.char_detector = (
+            YOLODetector(
+                char_detector_path,
+                confidence=config.detection.char_confidence_threshold,
+            )
+            if char_enabled and char_detector_path is not None
             else None
         )
         self.ocr_reader = (
@@ -85,7 +99,12 @@ class TrafficMonitoringPipeline:
         )
         self.track_manager = TrackManager(config)
         self.rider_association = RiderAssociationEngine(config)
-        self.plate_recognizer = PlateRecognizer(config, self.plate_detector, self.ocr_reader)
+        self.plate_recognizer = PlateRecognizer(
+            config,
+            self.plate_detector,
+            self.ocr_reader,
+            self.char_detector,
+        )
         self.helmet_analyzer = HelmetComplianceAnalyzer(config, self.helmet_detector)
         self.face_capture = FaceCaptureAnalyzer(config, self.face_detector)
         self.violation_engine = ViolationEngine(config)

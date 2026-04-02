@@ -38,6 +38,7 @@ class ModelPaths:
     main_detector: Path
     helmet_detector: Path
     plate_detector: Path
+    char_detector: Path | None = None
     face_detector: Path | None = None
 
 
@@ -56,9 +57,11 @@ class OCRConfig:
     """Configuration for OCR behavior."""
 
     enabled: bool = True
-    languages: tuple[str, ...] = ("en",)
+    languages: tuple[str, ...] = ("en", "ne")
     minimum_confidence: float = 0.35
     enforce_plate_rules: bool = False
+    frame_interval: int = 5
+    stable_cooldown_frames: int = 15
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +72,7 @@ class RuntimeConfig:
     fps_override: float | None = 12.0
     frame_limit: int | None = None
     helmet_debug: bool = False
+    ocr_debug: bool = False
     system_mode: str = "traffic_management_mode"
     overlay_mode: str = "monitoring"
 
@@ -112,6 +116,7 @@ class DetectionConfig:
     )
     confidence_threshold: float = 0.25
     plate_confidence_threshold: float = 0.25
+    char_confidence_threshold: float = 0.20
     helmet_confidence_threshold: float = 0.30
     face_confidence_threshold: float = 0.50
     minimum_association_iou: float = 0.10
@@ -222,6 +227,7 @@ def build_default_config(root: Path | None = None) -> TrafficMonitoringConfig:
             main_detector=Path("yolov8n.pt"),
             helmet_detector=models_dir / "helmet.pt",
             plate_detector=models_dir / "plate.pt",
+            char_detector=models_dir / "char_model.pt",
             face_detector=models_dir / "face.pt",
         ),
         runtime=RuntimePaths(
@@ -273,6 +279,7 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
         main_detector=Path(primary_model_arg) if primary_model_arg else base.models.main_detector,
         helmet_detector=Path(helmet_model_arg) if helmet_model_arg else base.models.helmet_detector,
         plate_detector=Path(plate_model_arg) if plate_model_arg else base.models.plate_detector,
+        char_detector=base.models.char_detector,
         face_detector=base.models.face_detector,
     )
     runtime = RuntimePaths(
@@ -294,6 +301,7 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
             else None
         ),
         helmet_debug=bool(getattr(namespace, "helmet_debug", base.runtime_options.helmet_debug)),
+        ocr_debug=bool(getattr(namespace, "ocr_debug", base.runtime_options.ocr_debug)),
         system_mode=str(getattr(namespace, "system_mode", base.runtime_options.system_mode)),
         overlay_mode=(
             "traffic_control"

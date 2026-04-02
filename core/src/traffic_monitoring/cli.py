@@ -84,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Draw helmet and no-helmet debug detections with confidence scores.",
     )
     parser.add_argument(
+        "--ocr-debug",
+        action="store_true",
+        help="Print OCR debug logs for plate processing.",
+    )
+    parser.add_argument(
         "--frame-skip",
         type=int,
         default=1,

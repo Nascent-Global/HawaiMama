@@ -19,26 +19,47 @@ _base_config = build_default_config()
 _base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/snapshots", StaticFiles(directory=str(_base_config.runtime.output_dir)), name="snapshots")
 
-cameras: dict[str, dict[str, str]] = {
-    "cam1": {
-        "id": "cam1",
-        "source": "input/input6.mp4",
-        "location": "Lakeside",
-        "status": "online",
-        "system_mode": "traffic_management_mode",
-        "intersection_id": "main_intersection",
-        "lanes": ["north", "east"],
-    },
-    "cam2": {
-        "id": "cam2",
-        "source": "input/input2.mp4",
-        "location": "Highway South",
-        "status": "online",
-        "system_mode": "traffic_management_mode",
-        "intersection_id": "main_intersection",
-        "lanes": ["south", "west"],
-    },
-}
+def _build_camera_registry() -> dict[str, dict[str, object]]:
+    cameras: dict[str, dict[str, object]] = {}
+    for index in range(1, 10):
+        camera_id = f"cam{index}"
+        cameras[camera_id] = {
+            "id": camera_id,
+            "source": f"input/input{index}.mp4",
+            "location": f"Input {index}",
+            "status": "online",
+            "system_mode": "enforcement_mode",
+        }
+
+    cameras["cam6"].update(
+        {
+            "location": "Lakeside",
+            "system_mode": "traffic_management_mode",
+            "intersection_id": "main_intersection",
+            "lanes": ["north", "east"],
+        }
+    )
+    cameras["cam7"].update(
+        {
+            "location": "Highway South",
+            "system_mode": "traffic_management_mode",
+            "intersection_id": "main_intersection",
+            "lanes": ["south", "west"],
+        }
+    )
+    cameras["cam9"].update(
+        {
+            "frame_skip": 2,
+            "resolution": (720, 1280),
+            "fps_limit": 8.0,
+            "ocr_debug": False,
+            "ocr_enabled": False,
+        }
+    )
+    return cameras
+
+
+cameras: dict[str, dict[str, object]] = _build_camera_registry()
 events: list[dict[str, object]] = []
 traffic_state_by_camera: dict[str, dict[str, object]] = {}
 intersection_state_by_id: dict[str, dict[str, object]] = {}
@@ -55,7 +76,7 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
     camera = cameras.get(camera_id)
     if camera is None:
         raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
-    source = camera["source"]
+    source = str(camera["source"])
 
     config = build_default_config()
     stream_output_dir = config.runtime.output_dir / camera_id
@@ -68,17 +89,37 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
     runtime_options = replace(
         config.runtime_options,
         system_mode=camera.get("system_mode", config.runtime_options.system_mode),
+        ocr_debug=bool(camera.get("ocr_debug", config.runtime_options.ocr_debug)),
         overlay_mode=(
             "traffic_control"
             if camera.get("system_mode", config.runtime_options.system_mode) == "traffic_management_mode"
             else "monitoring"
         ),
     )
+    performance = replace(
+        config.performance,
+        frame_skip=int(camera.get("frame_skip", config.performance.frame_skip)),
+        resolution=camera.get("resolution", config.performance.resolution),
+        fps_limit=float(camera.get("fps_limit", config.performance.fps_limit))
+        if camera.get("fps_limit", config.performance.fps_limit) is not None
+        else None,
+    )
     speed = replace(
         config.speed,
         enabled=runtime_options.system_mode != "traffic_management_mode",
     )
-    return source, replace(config, runtime=runtime, runtime_options=runtime_options, speed=speed)
+    ocr = replace(
+        config.ocr,
+        enabled=bool(camera.get("ocr_enabled", config.ocr.enabled)),
+    )
+    return source, replace(
+        config,
+        runtime=runtime,
+        runtime_options=runtime_options,
+        performance=performance,
+        speed=speed,
+        ocr=ocr,
+    )
 
 
 def _intersection_signal_machine(intersection_id: str) -> SignalStateMachine:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from math import hypot
+import unicodedata
 from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 
 import cv2
@@ -386,10 +388,16 @@ class PlateRecognizer:
         config: "TrafficMonitoringConfig",
         detector: "YOLODetector | None",
         ocr_reader: "EasyOCRReader | None",
+        char_detector: "YOLODetector | None" = None,
     ) -> None:
         self.config = config
         self.detector = detector
         self.ocr_reader = ocr_reader
+        self.char_detector = char_detector
+
+    def _debug(self, message: str) -> None:
+        if self.config.runtime_options.ocr_debug:
+            print(message)
 
     def enrich_tracks(self, frame: np.ndarray, tracks: Sequence[TrackState]) -> None:
         vehicle_tracks = [track for track in tracks if track.label_name != "person"]
@@ -401,9 +409,19 @@ class PlateRecognizer:
             return
 
         for track in vehicle_tracks:
-            self._enrich_track(frame, track)
+            self.handle_plate(track, frame)
+
+    def handle_plate(self, track: TrackState, frame: np.ndarray) -> None:
+        self._enrich_track(frame, track)
 
     def _enrich_track(self, frame: np.ndarray, track: TrackState) -> None:
+        if self._can_skip_plate_ocr(track):
+            return
+        track.metadata["plate_last_attempt_frame"] = track.last_seen_frame
+        self._debug(
+            f"[plate-ocr] trigger track={track.track_id} frame={track.last_seen_frame}"
+        )
+
         crop, origin = self._crop(frame, track.bbox)
         if crop.size == 0:
             track.mark_plate(text=None, confidence=None, state=PlateState.MISSING, bbox=None)
@@ -420,14 +438,15 @@ class PlateRecognizer:
         plate_crop, _ = self._crop(frame, translated_bbox)
         text, confidence = self._read_plate_text(plate_crop)
         if text:
-            current_conf = track.plate_confidence or 0.0
-            if confidence >= current_conf:
-                track.mark_plate(
-                    text=text,
-                    confidence=confidence,
-                    state=PlateState.READABLE,
-                    bbox=translated_bbox,
-                )
+            smoothed_text = self._update_plate_history(track, text)
+            best_confidence = max(confidence or 0.0, track.plate_confidence or 0.0)
+            track.mark_plate(
+                text=smoothed_text,
+                confidence=best_confidence,
+                state=PlateState.READABLE,
+                bbox=translated_bbox,
+            )
+            track.metadata["plate_last_success_frame"] = track.last_seen_frame
             return
         track.mark_plate(
             text=None if track.plate_text is None else track.plate_text,
@@ -439,16 +458,383 @@ class PlateRecognizer:
     def _read_plate_text(self, image: np.ndarray) -> tuple[str | None, float | None]:
         if self.ocr_reader is None or image.size == 0:
             return None, None
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        scaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-        candidates = self.ocr_reader.read(scaled)
+        plate_format = self._detect_plate_format(image)
+        self._debug(f"[plate-ocr] plate format: {plate_format}")
+
+        if plate_format == "traditional":
+            top_region, bottom_region = self._split_plate_regions(image)
+            top_text, top_conf = self._read_top_plate_text(top_region)
+            bottom_digits, bottom_conf = self._read_bottom_plate_digits(bottom_region)
+            confidence_values = [value for value in (top_conf, bottom_conf) if value is not None]
+            mean_confidence = (
+                sum(confidence_values) / len(confidence_values) if confidence_values else None
+            )
+            self._debug(f"[plate-ocr] structured top: {top_text!r}")
+            self._debug(f"[plate-ocr] structured bottom: {bottom_digits!r}")
+            if bottom_digits:
+                return bottom_digits, mean_confidence
+        else:
+            modern_text, modern_conf = self._read_modern_plate_text(image)
+            if modern_text:
+                return modern_text, modern_conf
+
+        if plate_format == "traditional":
+            segmented_text, segmented_conf = self._read_segmented_plate_text(image)
+            if segmented_text:
+                return segmented_text, segmented_conf
+        return self._read_full_plate_text(image)
+
+    def _detect_plate_format(self, image: np.ndarray) -> str:
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
+        value = hsv[:, :, 2]
+        red_mask_1 = cv2.inRange(hsv, (0, 60, 40), (15, 255, 255))
+        red_mask_2 = cv2.inRange(hsv, (160, 60, 40), (180, 255, 255))
+        red_mask = cv2.bitwise_or(red_mask_1, red_mask_2)
+        white_mask = cv2.inRange(hsv, (0, 0, 130), (180, 80, 255))
+
+        red_ratio = float(cv2.countNonZero(red_mask)) / max(1, image.shape[0] * image.shape[1])
+        white_ratio = float(cv2.countNonZero(white_mask)) / max(1, image.shape[0] * image.shape[1])
+        if red_ratio > white_ratio:
+            return "traditional"
+        return "modern"
+
+    def _split_plate_regions(self, image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        height = image.shape[0]
+        split_y = max(1, min(height - 1, int(height * 0.40)))
+        top_region = image[:split_y, :].copy()
+        bottom_region = image[split_y:, :].copy()
+        return top_region, bottom_region
+
+    def _read_top_plate_text(self, image: np.ndarray) -> tuple[str | None, float | None]:
+        if image.size == 0:
+            return None, None
+        candidates = self._ocr_variants(image)
         if not candidates:
             return None, None
         best = max(candidates, key=lambda candidate: candidate.confidence)
-        normalized = "".join(character for character in best.text.upper() if character.isalnum())
+        normalized = self._normalize_traditional_top_text(best.text)
+        self._debug(f"[plate-ocr] raw top: {best.text!r}")
+        self._debug(f"[plate-ocr] cleaned top: {normalized!r}")
         if not normalized or best.confidence < self.config.ocr.minimum_confidence:
             return None, best.confidence
         return normalized, best.confidence
+
+    def _read_bottom_plate_digits(self, image: np.ndarray) -> tuple[str | None, float | None]:
+        if image.size == 0:
+            return None, None
+        segmented_text, segmented_conf = self._read_segmented_plate_digits(image)
+        if segmented_text:
+            return segmented_text, segmented_conf
+
+        candidates = self._ocr_variants(image)
+        if not candidates:
+            return None, None
+        best = max(candidates, key=lambda candidate: candidate.confidence)
+        normalized = self._normalize_bottom_digits(best.text)
+        self._debug(f"[plate-ocr] raw bottom: {best.text!r}")
+        self._debug(f"[plate-ocr] cleaned bottom: {normalized!r}")
+        if not normalized or best.confidence < self.config.ocr.minimum_confidence:
+            return None, best.confidence
+        return normalized, best.confidence
+
+    def _read_modern_plate_text(self, image: np.ndarray) -> tuple[str | None, float | None]:
+        focus_region = self._crop_modern_plate_center(image)
+        candidates = self._ocr_variants(focus_region)
+        if not candidates:
+            return None, None
+        best = max(candidates, key=lambda candidate: candidate.confidence)
+        normalized = self._normalize_modern_plate_text(best.text)
+        self._debug(f"[plate-ocr] raw modern full: {best.text!r}")
+        self._debug(f"[plate-ocr] cleaned modern full: {normalized!r}")
+        if (
+            not normalized
+            or len(normalized) < 4
+            or best.confidence < self.config.ocr.minimum_confidence
+        ):
+            return None, best.confidence
+        return normalized, best.confidence
+
+    def _crop_modern_plate_center(self, image: np.ndarray) -> np.ndarray:
+        height, width = image.shape[:2]
+        x1 = max(0, int(width * 0.18))
+        x2 = min(width, int(width * 0.95))
+        y1 = max(0, int(height * 0.22))
+        y2 = min(height, int(height * 0.92))
+        if x2 <= x1 or y2 <= y1:
+            return image
+        return image[y1:y2, x1:x2].copy()
+
+    def _read_segmented_plate_digits(self, image: np.ndarray) -> tuple[str | None, float | None]:
+        if self.char_detector is None:
+            return None, None
+        detections = self.char_detector.predict(image, verbose=False)
+        if not detections:
+            return None, None
+
+        filtered = self._filter_character_detections(image, detections)
+        self._debug(f"[plate-ocr] bottom char boxes before filtering: {len(detections)}")
+        self._debug(f"[plate-ocr] bottom char boxes after filtering: {len(filtered)}")
+        if not filtered:
+            return None, None
+
+        ordered = sorted(filtered, key=lambda detection: detection.xyxy[0])[:10]
+        digits: list[str] = []
+        confidences: list[float] = []
+        for detection in ordered:
+            char_bbox = BoundingBox(*detection.xyxy)
+            char_crop, _ = self._crop(image, char_bbox)
+            if char_crop.size == 0:
+                continue
+            text, confidence = self._read_single_character(char_crop)
+            if not text:
+                continue
+            normalized_digit = self._normalize_bottom_digits(text)
+            if not normalized_digit:
+                continue
+            digits.append(normalized_digit[0])
+            confidences.append(confidence or 0.0)
+
+        assembled = self._normalize_bottom_digits("".join(digits))
+        self._debug(f"[plate-ocr] raw bottom segmented: {''.join(digits)!r}")
+        self._debug(f"[plate-ocr] cleaned bottom segmented: {assembled!r}")
+        if not assembled:
+            return None, None
+        mean_confidence = sum(confidences) / len(confidences) if confidences else None
+        if mean_confidence is not None and mean_confidence < self.config.ocr.minimum_confidence:
+            return None, mean_confidence
+        return assembled, mean_confidence
+
+    def _read_segmented_plate_text(self, image: np.ndarray) -> tuple[str | None, float | None]:
+        if self.char_detector is None:
+            return None, None
+        detections = self.char_detector.predict(image, verbose=False)
+        if not detections:
+            return None, None
+
+        filtered = self._filter_character_detections(image, detections)
+        self._debug(f"[plate-ocr] char boxes before filtering: {len(detections)}")
+        self._debug(f"[plate-ocr] char boxes after filtering: {len(filtered)}")
+        if not filtered:
+            return None, None
+
+        ordered = sorted(filtered, key=lambda detection: detection.xyxy[0])[:10]
+        characters: list[str] = []
+        confidences: list[float] = []
+        for detection in ordered:
+            char_bbox = BoundingBox(*detection.xyxy)
+            char_crop, _ = self._crop(image, char_bbox)
+            if char_crop.size == 0:
+                continue
+            text, confidence = self._read_single_character(char_crop)
+            if not text:
+                continue
+            characters.append(text[0])
+            confidences.append(confidence or 0.0)
+
+        assembled = self._postprocess_segmented_text("".join(characters))
+        normalized = self._normalize_plate_text(assembled)
+        self._debug(f"[plate-ocr] raw segmented: {assembled!r}")
+        self._debug(f"[plate-ocr] cleaned segmented: {normalized!r}")
+        if not normalized:
+            return None, None
+        mean_confidence = sum(confidences) / len(confidences) if confidences else None
+        if mean_confidence is not None and mean_confidence < self.config.ocr.minimum_confidence:
+            return None, mean_confidence
+        return normalized, mean_confidence
+
+    def _read_single_character(self, image: np.ndarray) -> tuple[str | None, float | None]:
+        candidates = self._ocr_variants(image)
+        if not candidates:
+            return None, None
+        best = max(candidates, key=lambda candidate: candidate.confidence)
+        normalized = self._normalize_plate_text(best.text)
+        self._debug(f"[plate-ocr] raw char: {best.text!r}")
+        self._debug(f"[plate-ocr] cleaned char: {normalized!r}")
+        if not normalized or best.confidence < self.config.ocr.minimum_confidence:
+            return None, best.confidence
+        return normalized[0], best.confidence
+
+    def _read_full_plate_text(self, image: np.ndarray) -> tuple[str | None, float | None]:
+        candidates = self._ocr_variants(image)
+        if not candidates:
+            return None, None
+        best = max(candidates, key=lambda candidate: candidate.confidence)
+        normalized = self._normalize_plate_text(best.text)
+        self._debug(f"[plate-ocr] raw full: {best.text!r}")
+        self._debug(f"[plate-ocr] cleaned full: {normalized!r}")
+        if not normalized or best.confidence < self.config.ocr.minimum_confidence:
+            return None, best.confidence
+        return normalized, best.confidence
+
+    def _filter_character_detections(self, image: np.ndarray, detections):
+        plate_height, plate_width = image.shape[:2]
+        min_width = max(3.0, plate_width * 0.02)
+        max_width = max(min_width, plate_width * 0.35)
+        min_height = max(8.0, plate_height * 0.18)
+        max_height = plate_height * 0.98
+
+        filtered = []
+        for detection in detections:
+            if detection.confidence < self.config.detection.char_confidence_threshold:
+                continue
+            x1, y1, x2, y2 = detection.xyxy
+            width = x2 - x1
+            height = y2 - y1
+            if width < min_width or width > max_width:
+                continue
+            if height < min_height or height > max_height:
+                continue
+            aspect_ratio = width / max(height, 1.0)
+            if aspect_ratio < 0.08 or aspect_ratio > 1.2:
+                continue
+            filtered.append(detection)
+
+        filtered.sort(key=lambda detection: (detection.confidence, -(detection.xyxy[2] - detection.xyxy[0])), reverse=True)
+        return filtered[:10]
+
+    def _ocr_variants(self, image: np.ndarray):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        scaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+        equalized = cv2.equalizeHist(scaled)
+        _, thresholded = cv2.threshold(equalized, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        candidates = []
+        for variant in (scaled, equalized, thresholded):
+            candidates.extend(self.ocr_reader.read(variant))
+        return candidates
+
+    def _normalize_plate_text(self, text: str) -> str:
+        cleaned_characters: list[str] = []
+        for character in text.strip():
+            if self._is_allowed_plate_character(character):
+                cleaned_characters.append(character.upper() if character.isascii() else character)
+            elif character.isspace():
+                cleaned_characters.append(" ")
+        cleaned = " ".join("".join(cleaned_characters).split())
+        if not cleaned:
+            return ""
+        return cleaned[:8]
+
+    def _normalize_bottom_digits(self, text: str) -> str:
+        digit_map = {
+            "0": "०",
+            "1": "१",
+            "2": "२",
+            "3": "३",
+            "4": "४",
+            "5": "५",
+            "6": "६",
+            "7": "७",
+            "8": "८",
+            "9": "९",
+            "०": "०",
+            "१": "१",
+            "२": "२",
+            "३": "३",
+            "४": "४",
+            "५": "५",
+            "६": "६",
+            "७": "७",
+            "८": "८",
+            "९": "९",
+            "O": "०",
+            "o": "०",
+            "Q": "०",
+            "Z": "२",
+            "z": "२",
+            "S": "५",
+            "s": "५",
+            "T": "७",
+            "?": "७",
+        }
+        digits = [digit_map[character] for character in text if character in digit_map]
+        if not digits:
+            return ""
+        return "".join(digits[:4])
+
+    def _normalize_traditional_top_text(self, text: str) -> str:
+        cleaned_characters: list[str] = []
+        for character in text.strip():
+            if "\u0900" <= character <= "\u097f":
+                cleaned_characters.append(character)
+            elif character.isspace():
+                cleaned_characters.append(" ")
+        cleaned = " ".join("".join(cleaned_characters).split())
+        return cleaned[:12]
+
+    def _normalize_modern_plate_text(self, text: str) -> str:
+        cleaned = "".join(
+            character.upper()
+            for character in text
+            if ("A" <= character.upper() <= "Z") or character.isdigit() or ("\u0966" <= character <= "\u096f")
+        )
+        if not cleaned:
+            return ""
+        return cleaned[:8]
+
+    def _postprocess_segmented_text(self, text: str) -> str:
+        if not text:
+            return ""
+        cleaned = self._normalize_plate_text(text)
+        result: list[str] = []
+        digit_mode = False
+        for character in cleaned:
+            if character.isspace():
+                continue
+            if self._is_digit_character(character):
+                digit_mode = True
+                result.append(character)
+                continue
+            if digit_mode:
+                continue
+            if self._is_letter_character(character):
+                result.append(character)
+        return "".join(result)
+
+    def _is_allowed_plate_character(self, character: str) -> bool:
+        if self._is_digit_character(character) or self._is_letter_character(character):
+            return True
+        return False
+
+    def _is_digit_character(self, character: str) -> bool:
+        return character.isdigit() or ("\u0966" <= character <= "\u096f")
+
+    def _is_letter_character(self, character: str) -> bool:
+        return ("A" <= character.upper() <= "Z") or ("\u0900" <= character <= "\u097f")
+
+    def _update_plate_history(self, track: TrackState, value: str) -> str:
+        readings = track.metadata.get("plate_readings")
+        if not isinstance(readings, deque):
+            readings = deque(maxlen=5)
+        readings.append(value)
+        track.metadata["plate_readings"] = readings
+        counts = Counter(readings)
+        smoothed = counts.most_common(1)[0][0]
+        track.metadata["plate_stable"] = counts[smoothed] >= 3
+        track.metadata["plate_last_processed_frame"] = track.last_seen_frame
+        return smoothed
+
+    def _can_skip_plate_ocr(self, track: TrackState) -> bool:
+        interval = max(1, self.config.ocr.frame_interval)
+        last_attempt = track.metadata.get("plate_last_attempt_frame")
+        if isinstance(last_attempt, int) and (track.last_seen_frame - last_attempt) < interval:
+            return True
+
+        if not track.plate_text:
+            return False
+
+        last_success = track.metadata.get("plate_last_success_frame")
+        cooldown = max(interval, self.config.ocr.stable_cooldown_frames)
+        if isinstance(last_success, int) and (track.last_seen_frame - last_success) < cooldown:
+            return True
+
+        if not track.metadata.get("plate_stable", False):
+            return False
+        last_processed = track.metadata.get("plate_last_processed_frame")
+        if not isinstance(last_processed, int):
+            return False
+        return (track.last_seen_frame - last_processed) < cooldown
 
     def _crop(
         self,

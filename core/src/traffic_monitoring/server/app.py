@@ -81,6 +81,9 @@ def _utc_now_iso() -> str:
 def _timestamp_to_iso(timestamp_seconds: float) -> str:
     return datetime.fromtimestamp(timestamp_seconds, tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
+_base_config = build_default_config()
+load_dotenv(_base_config.root / ".env", override=False)
+_object_storage_settings = load_object_storage_settings(_base_config.root)
 
 app = FastAPI(title="Traffic Monitoring Stream Server")
 app.add_middleware(
@@ -90,10 +93,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-_base_config = build_default_config()
-load_dotenv(_base_config.root / ".env", override=False)
-_object_storage_settings = load_object_storage_settings(_base_config.root)
 _base_config.runtime.output_dir.mkdir(parents=True, exist_ok=True)
 (_base_config.root / "surveillance").mkdir(parents=True, exist_ok=True)
 _object_storage_settings.local_root.mkdir(parents=True, exist_ok=True)

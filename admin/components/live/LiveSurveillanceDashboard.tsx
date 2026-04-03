@@ -13,9 +13,12 @@ import { getSurveillanceFeeds } from "@/lib/api";
 import { canAccessPermission, useAdminSession } from "@/lib/auth";
 import type { SurveillanceFeed } from "@/types/surveillance";
 
-type NavKey = "live" | "violations" | "accidents" | "challan";
+import DashboardMap from "@/components/map/DashboardMap";
+
+type NavKey = "overview" | "live" | "violations" | "accidents" | "challan";
 
 const navItems: { key: NavKey; label: string }[] = [
+  { key: "overview", label: "Map Overview" },
   { key: "live", label: "Live surveillance" },
   { key: "violations", label: "Violation logs" },
   { key: "accidents", label: "Accident logs" },
@@ -350,7 +353,7 @@ function SessionBlock({
 
 export default function LiveSurveillanceDashboard() {
   const { admin, logout } = useAdminSession();
-  const [nav, setNav] = useState<NavKey>("live");
+  const [nav, setNav] = useState<NavKey>("overview");
   const [feeds, setFeeds] = useState<SurveillanceFeed[]>([]);
   const [selectedFeedId, setSelectedFeedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -370,6 +373,7 @@ export default function LiveSurveillanceDashboard() {
   const visibleNavItems = useMemo(
     () =>
       navItems.filter((item) => {
+        if (item.key === "overview") return true; // anyone can view overview
         if (item.key === "live") return canViewLive;
         if (item.key === "violations") return canViewViolations;
         if (item.key === "accidents") return canViewAccidents;
@@ -429,8 +433,10 @@ export default function LiveSurveillanceDashboard() {
 
   useEffect(() => {
     if (selectedFeedId && !selectedFeed) {
-      setSelectedFeedId(null);
+      const timer = window.setTimeout(() => setSelectedFeedId(null), 0);
+      return () => window.clearTimeout(timer);
     }
+    return undefined;
   }, [selectedFeed, selectedFeedId]);
 
   return (
@@ -529,6 +535,17 @@ export default function LiveSurveillanceDashboard() {
             <div className="border border-dashed border-[var(--gov-line-strong)] bg-[var(--gov-paper-alt)] px-4 py-8 text-sm text-[var(--gov-muted)]">
               No sections have been assigned to this account yet.
             </div>
+          ) : null}
+
+          {activeNav === "overview" ? (
+             <div className="h-[800px] w-full border border-[var(--gov-line)] shadow-sm">
+                <DashboardMap 
+                  onSelectCamera={(feedId) => {
+                    setNav("live");
+                    openFeedMonitor(feedId);
+                  }}
+                />
+             </div>
           ) : null}
 
           {activeNav === "violations" && canViewViolations ? <ViolationLogsSection canVerify={canVerifyViolations} /> : null}

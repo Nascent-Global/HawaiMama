@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  --font-body: "Noto Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-heading: "Merriweather", Georgia, Cambria, "Times New Roman", serif;
   --gov-red: #c1272d;
   --gov-red-dark: #9f1d23;
   --gov-blue: #003893;
@@ -36,7 +38,7 @@ body {
     linear-gradient(180deg, rgba(0, 56, 147, 0.08), rgba(0, 56, 147, 0) 26%),
     linear-gradient(90deg, rgba(193, 39, 45, 0.045), rgba(193, 39, 45, 0) 34%),
     #edf2f9;
-  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-body);
 }
 
 a {

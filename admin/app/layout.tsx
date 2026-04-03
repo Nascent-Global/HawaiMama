@@ -1,24 +1,12 @@
-import { Merriweather, Noto_Sans } from "next/font/google";
+import type { ReactNode } from "react";
 import "./globals.css";
 import CustomCursor from "@/components/CustomCursor";
 import { AdminSessionProvider } from "@/lib/auth";
 
-const bodyFont = Noto_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-body",
-});
-
-const headingFont = Merriweather({
-  subsets: ["latin"],
-  weight: ["700"],
-  variable: "--font-heading",
-});
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${bodyFont.variable} ${headingFont.variable}`}>
-      <body className={`${bodyFont.className} antialiased`}>
+    <html lang="en">
+      <body className="antialiased">
         <AdminSessionProvider>
           <CustomCursor />
           {children}

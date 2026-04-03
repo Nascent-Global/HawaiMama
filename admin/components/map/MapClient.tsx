@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import type { GeoJsonObject } from "geojson";
 import {
   MapContainer,
   TileLayer,
@@ -52,12 +53,12 @@ interface MapClientProps {
 }
 
 export default function MapClient({ onSelectCamera }: MapClientProps) {
-  const [geoData, setGeoData] = useState<Record<string, unknown> | null>(null);
+  const [geoData, setGeoData] = useState<GeoJsonObject | null>(null);
 
   useEffect(() => {
     // Fetch the GeoJSON file we generated in the public folder
     fetch("/data/pokhara.geojson")
-      .then((res) => res.json())
+      .then((res) => res.json() as Promise<GeoJsonObject>)
       .then((data) => setGeoData(data))
       .catch((err) => console.error("Error loading GeoJSON", err));
   }, []);

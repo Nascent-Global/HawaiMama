@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getChallans } from "@/lib/api";
 import type { ChallanLog } from "@/types/challan";
 
@@ -23,6 +23,52 @@ export default function ChallanLogsSection() {
   const [selected, setSelected] = useState<ChallanLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const printRef = useRef<HTMLDivElement | null>(null);
+
+  const handlePrint = () => {
+    if (!selected || !printRef.current) return;
+
+    const printHtml = `
+      <html>
+        <head>
+          <title>Challan - ${selected.ticket.ticketNumber}</title>
+          <style>
+            body { font-family: Inter, sans-serif; margin: 0; padding: 12px; color: #0f172a; background: #f8fafc; }
+            .printable { width: 100%; }
+            .border { border: 1px solid #cbd5e1; }
+            .border-b-4 { border-bottom-width: 4px; }
+            .text-center { text-align: center; }
+            .text-sm { font-size: 0.875rem; }
+            .text-lg { font-size: 1.125rem; }
+            .text-xl { font-size: 1.25rem; }
+            .font-bold { font-weight: 700; }
+            .uppercase { text-transform: uppercase; }
+            .tracking-[0.22em], .tracking-[0.24em] { letter-spacing: 0.22em; }
+            .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+            .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+            .p-4 { padding: 1rem; }
+            .bg-white { background: white; }
+          </style>
+        </head>
+        <body>
+          <div class="printable">${printRef.current.innerHTML}</div>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open("", "_blank", "width=900,height=800");
+    if (!printWindow) return;
+
+    printWindow.document.open();
+    printWindow.document.write(printHtml);
+    printWindow.document.close();
+    printWindow.focus();
+
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
 
   useEffect(() => {
     async function load() {
@@ -125,7 +171,7 @@ export default function ChallanLogsSection() {
 
         <div className="gov-scrollbar min-h-0 overflow-auto bg-[var(--gov-paper-alt)]">
           {selected ? (
-            <div className="px-4 py-4 sm:px-5">
+            <div className="px-4 py-4 sm:px-5" ref={printRef}>
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--gov-red)]">
@@ -139,7 +185,7 @@ export default function ChallanLogsSection() {
                   <button
                     type="button"
                     className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
-                    onClick={() => window.print()}
+                    onClick={handlePrint}
                   >
                     Print
                   </button>

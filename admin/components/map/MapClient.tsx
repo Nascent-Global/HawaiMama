@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import type { GeoJsonObject } from "geojson";
 import {
   MapContainer,
   TileLayer,
@@ -22,22 +23,78 @@ const MOCK_OTHER_FEEDS = [
 ];
 
 const CCTV_POINTS: CCTVPoint[] = [
-  { name: "Sirjana Chowk", lat: 28.2118, lng: 83.9781, status: "Active", feedId: "cam-sirjana-01" },
-  { name: "Lakeside (Fewa Corridor)", lat: 28.2105, lng: 83.9575, status: "Active", feedId: null },
-  { name: "Prithvi Marg Checkpoint", lat: 28.2081, lng: 83.9880, status: "Active", feedId: null },
-  { name: "Mitighar Approach", lat: 28.1994, lng: 83.9814, status: "Active", feedId: null },
-  { name: "Zero Kilometer (Baglung Hwy)", lat: 28.2120, lng: 83.9705, status: "Active", feedId: null },
-  { name: "New Road Traffic Cell", lat: 28.2045, lng: 83.9806, status: "Active", feedId: null },
-  { name: "Birauta", lat: 28.1923, lng: 83.9782, status: "Active", feedId: null },
-  { name: "Rastra Bank Chowk", lat: 28.2045, lng: 83.9806, status: "Active", feedId: null },
-  { name: "Mustang Chowk", lat: 28.1994, lng: 83.9814, status: "Active", feedId: null },
+  {
+    name: "Sirjana Chowk",
+    lat: 28.2118,
+    lng: 83.9781,
+    status: "Active",
+    feedId: "cam-sirjana-01",
+  },
+  {
+    name: "Lakeside (Fewa Corridor)",
+    lat: 28.2105,
+    lng: 83.9575,
+    status: "Active",
+    feedId: null,
+  },
+  {
+    name: "Prithvi Marg Checkpoint",
+    lat: 28.2081,
+    lng: 83.988,
+    status: "Active",
+    feedId: null,
+  },
+  {
+    name: "Mitighar Approach",
+    lat: 28.1994,
+    lng: 83.9814,
+    status: "Active",
+    feedId: null,
+  },
+  {
+    name: "Zero Kilometer (Baglung Hwy)",
+    lat: 28.212,
+    lng: 83.9705,
+    status: "Active",
+    feedId: null,
+  },
+  {
+    name: "New Road Traffic Cell",
+    lat: 28.2045,
+    lng: 83.9806,
+    status: "Active",
+    feedId: null,
+  },
+  {
+    name: "Birauta",
+    lat: 28.1923,
+    lng: 83.9782,
+    status: "Active",
+    feedId: null,
+  },
+  {
+    name: "Rastra Bank Chowk",
+    lat: 28.2045,
+    lng: 83.9806,
+    status: "Active",
+    feedId: null,
+  },
+  {
+    name: "Mustang Chowk",
+    lat: 28.1994,
+    lng: 83.9814,
+    status: "Active",
+    feedId: null,
+  },
 ];
 
 function getDeterministicRandomFeedId(name: string): string {
-  const hash = Array.from(name).reduce((acc, char) => (acc + char.charCodeAt(0)) % 1000, 0);
+  const hash = Array.from(name).reduce(
+    (acc, char) => (acc + char.charCodeAt(0)) % 1000,
+    0,
+  );
   return MOCK_OTHER_FEEDS[hash % MOCK_OTHER_FEEDS.length];
 }
-
 
 interface CCTVPoint {
   name: string;
@@ -52,12 +109,12 @@ interface MapClientProps {
 }
 
 export default function MapClient({ onSelectCamera }: MapClientProps) {
-  const [geoData, setGeoData] = useState<Record<string, unknown> | null>(null);
+  const [geoData, setGeoData] = useState<GeoJsonObject | null>(null);
 
   useEffect(() => {
     // Fetch the GeoJSON file we generated in the public folder
     fetch("/data/pokhara.geojson")
-      .then((res) => res.json())
+      .then((res) => res.json() as Promise<GeoJsonObject>)
       .then((data) => setGeoData(data))
       .catch((err) => console.error("Error loading GeoJSON", err));
   }, []);
@@ -90,14 +147,19 @@ export default function MapClient({ onSelectCamera }: MapClientProps) {
 
         {/* Render CCTV Points */}
         {CCTV_POINTS.map((pt, index) => {
-          const assignedFeedId = pt.feedId || getDeterministicRandomFeedId(pt.name);
+          const assignedFeedId =
+            pt.feedId || getDeterministicRandomFeedId(pt.name);
           const isActive = pt.status === "Active" && Boolean(assignedFeedId);
 
           return (
             <CircleMarker
               key={index}
               center={[pt.lat, pt.lng]}
-              pathOptions={{ color: isActive ? "#ef4444" : "#9ca3af", fillColor: isActive ? "#ef4444" : "#9ca3af", fillOpacity: 0.8 }}
+              pathOptions={{
+                color: isActive ? "#ef4444" : "#9ca3af",
+                fillColor: isActive ? "#ef4444" : "#9ca3af",
+                fillOpacity: 0.8,
+              }}
               radius={6}
               eventHandlers={{
                 click: () => {
@@ -112,9 +174,17 @@ export default function MapClient({ onSelectCamera }: MapClientProps) {
               </Tooltip>
               <Popup>
                 <div className="font-sans">
-                  <h3 className="font-bold text-gray-900 border-b pb-1 mb-1">{pt.name}</h3>
-                  <p className="text-sm text-gray-600">Type: PTZ Surveillance</p>
-                  <p className={`text-sm font-semibold ${isActive ? "text-green-600" : "text-gray-400"}`}>• {pt.status}</p>
+                  <h3 className="font-bold text-gray-900 border-b pb-1 mb-1">
+                    {pt.name}
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    Type: PTZ Surveillance
+                  </p>
+                  <p
+                    className={`text-sm font-semibold ${isActive ? "text-green-600" : "text-gray-400"}`}
+                  >
+                    • {pt.status}
+                  </p>
                   <button
                     className={`mt-2 w-full px-2 py-1 ${isActive ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "bg-gray-50 text-gray-400 cursor-not-allowed"} text-xs font-semibold rounded transition-colors`}
                     onClick={(e) => {

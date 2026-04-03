@@ -49,6 +49,7 @@ class TrafficMonitoringPipeline:
         char_detector_path = config.models.char_detector
         char_enabled = (
             self.enforcement_enabled
+            and not config.performance.performance_mode
             and char_detector_path is not None
             and char_detector_path.exists()
         )
@@ -301,21 +302,23 @@ class TrafficMonitoringPipeline:
         )
 
     def _should_process_frame(self, source_frame_index: int) -> bool:
-        return source_frame_index % self.config.performance.frame_skip == 0
+        frame_skip = max(1, self.config.performance.frame_skip)
+        if self.config.performance.performance_mode:
+            frame_skip = max(frame_skip, 2)
+        return source_frame_index % frame_skip == 0
 
     def _resize_for_detection(
         self,
         frame: np.ndarray,
     ) -> tuple[np.ndarray, float, float]:
-        target = self.config.performance.resolution
-        if target is None:
-            return frame, 1.0, 1.0
-        target_width, target_height = target
-        if target_width <= 0 or target_height <= 0:
-            return frame, 1.0, 1.0
+        max_width = 640
         source_height, source_width = frame.shape[:2]
-        if source_width == target_width and source_height == target_height:
+        if source_width <= 0 or source_height <= 0:
             return frame, 1.0, 1.0
+        if source_width <= max_width:
+            return frame, 1.0, 1.0
+        target_width = max_width
+        target_height = max(1, int(round(source_height * (target_width / source_width))))
         resized = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
         scale_x = source_width / target_width
         scale_y = source_height / target_height

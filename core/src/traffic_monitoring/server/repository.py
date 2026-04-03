@@ -774,6 +774,42 @@ class AdminRepository:
             connection.commit()
             return payload
 
+    def ingest_accident_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT payload_json
+                FROM accidents
+                WHERE id = %s
+                """,
+                (payload["id"],),
+            ).fetchone()
+            if existing is not None:
+                return _coerce_json(existing["payload_json"], {})
+
+            connection.execute(
+                """
+                INSERT INTO accidents (
+                    id,
+                    event_time,
+                    verified,
+                    created_at,
+                    updated_at,
+                    payload_json
+                )
+                VALUES (%s, %s, FALSE, %s, %s, %s)
+                """,
+                (
+                    payload["id"],
+                    _coerce_timestamp(payload["timestamp"]),
+                    _coerce_timestamp(payload["createdAt"]),
+                    _coerce_timestamp(payload["updatedAt"]),
+                    Jsonb(payload),
+                ),
+            )
+            connection.commit()
+            return payload
+
     def _connect(self) -> Connection[Any]:
         return connect(self.database_url, row_factory=dict_row)
 
@@ -1419,7 +1455,14 @@ class AdminRepository:
         return f"/inputs/{path.name}"
 
     def _processed_video_url(self, camera_id: str) -> str | None:
-        candidate = self.project_root / "surveillance" / "output" / f"{camera_id}.mp4"
-        if candidate.exists():
-            return f"/surveillance-output/{camera_id}.mp4"
+        output_root = self.project_root / "surveillance" / "output"
+        candidates = [f"{camera_id}.mp4"]
+        match = re.search(r"(\d+)$", camera_id)
+        if match is not None:
+            candidates.append(f"output{match.group(1)}.mp4")
+
+        for candidate_name in candidates:
+            candidate = output_root / candidate_name
+            if candidate.exists():
+                return f"/surveillance-output/{candidate_name}"
         return None

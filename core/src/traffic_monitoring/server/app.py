@@ -134,7 +134,9 @@ traffic_state_by_camera: dict[str, dict[str, object]] = {}
 intersection_state_by_id: dict[str, dict[str, object]] = {}
 _seen_event_keys: set[tuple[str, float, int, str]] = set()
 _recent_frames_by_camera: dict[str, deque[tuple[float, object]]] = {}
+_demo_accident_emitted_by_camera: set[str] = set()
 _api_event_codes = {
+    ViolationCode.ACCIDENT.value,
     ViolationCode.OVERSPEED.value,
     ViolationCode.NO_HELMET.value,
     ViolationCode.PLATE_UNREADABLE.value,
@@ -142,9 +144,15 @@ _api_event_codes = {
     ViolationCode.WRONG_LANE.value,
 }
 _intersection_signal_machines: dict[str, SignalStateMachine] = {}
-_VIOLATION_CLIP_PRE_SECONDS = 3.0
-_VIOLATION_CLIP_MAX_SECONDS = 6.0
+_VIOLATION_CLIP_PRE_SECONDS = 4.5
+_VIOLATION_CLIP_TARGET_SECONDS = 4.5
+_VIOLATION_CLIP_MAX_SECONDS = 8.0
+_VIOLATION_SCREENSHOT_COUNT = 3
+_VIOLATION_SCREENSHOT_LOOKBACK_SECONDS = 2.5
+_VIOLATION_SCREENSHOT_PADDING_RATIO = 0.2
 _SESSION_COOKIE_NAME = "hawaimama_session"
+_DEMO_ACCIDENT_SOURCE_MARKERS = ("accident",)
+_DEMO_ACCIDENT_MIN_FRAME_INDEX = 12
 
 
 class CameraConfigUpdate(BaseModel):
@@ -213,6 +221,11 @@ def _camera_metadata_updates(update: CameraConfigUpdate) -> dict[str, object]:
         "max_priority_score": update.max_priority_score,
         "initial_active_lane": (update.initial_active_lane or "").strip() or None,
     }
+
+
+def _camera_setting(camera: dict[str, object], key: str, default: Any) -> Any:
+    value = camera.get(key)
+    return default if value is None else value
 
 
 def _resolve_roi_config_path(config: TrafficMonitoringConfig, camera: dict[str, object]) -> Path:
@@ -511,6 +524,7 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
     if camera is None:
         raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
     source = str(camera["source"])
+    system_mode = str(_camera_setting(camera, "system_mode", "enforcement_mode"))
 
     config = build_default_config()
     stream_output_dir = config.runtime.output_dir / camera_id
@@ -523,78 +537,113 @@ def _camera_config(camera_id: str) -> tuple[str, TrafficMonitoringConfig]:
     )
     runtime_options = replace(
         config.runtime_options,
-        system_mode=camera.get("system_mode", config.runtime_options.system_mode),
-        ocr_debug=bool(camera.get("ocr_debug", config.runtime_options.ocr_debug)),
+        system_mode=system_mode,
+        ocr_debug=bool(_camera_setting(camera, "ocr_debug", config.runtime_options.ocr_debug)),
         overlay_mode=(
             "traffic_control"
-            if camera.get("system_mode", config.runtime_options.system_mode) == "traffic_management_mode"
+            if system_mode == "traffic_management_mode"
             else "monitoring"
         ),
     )
+    fps_limit = _camera_setting(camera, "fps_limit", config.performance.fps_limit)
     performance = replace(
         config.performance,
-        frame_skip=int(camera.get("frame_skip", config.performance.frame_skip)),
-        resolution=camera.get("resolution", config.performance.resolution),
-        fps_limit=float(camera.get("fps_limit", config.performance.fps_limit))
-        if camera.get("fps_limit", config.performance.fps_limit) is not None
+        frame_skip=int(_camera_setting(camera, "frame_skip", config.performance.frame_skip)),
+        resolution=_camera_setting(camera, "resolution", config.performance.resolution),
+        fps_limit=float(fps_limit)
+        if fps_limit is not None
         else None,
     )
     speed = replace(
         config.speed,
         enabled=runtime_options.system_mode != "traffic_management_mode",
-        line1_y=float(camera.get("line1_y", config.speed.line1_y)),
-        line2_y=float(camera.get("line2_y", config.speed.line2_y)),
-        line_distance_meters=float(camera.get("line_distance_meters", config.speed.line_distance_meters)),
-        line_tolerance_pixels=int(camera.get("line_tolerance_pixels", config.speed.line_tolerance_pixels)),
-        overspeed_threshold_kmh=float(camera.get("overspeed_threshold_kmh", config.speed.overspeed_threshold_kmh)),
+        line1_y=float(_camera_setting(camera, "line1_y", config.speed.line1_y)),
+        line2_y=float(_camera_setting(camera, "line2_y", config.speed.line2_y)),
+        line_distance_meters=float(
+            _camera_setting(camera, "line_distance_meters", config.speed.line_distance_meters)
+        ),
+        line_tolerance_pixels=int(
+            _camera_setting(camera, "line_tolerance_pixels", config.speed.line_tolerance_pixels)
+        ),
+        overspeed_threshold_kmh=float(
+            _camera_setting(camera, "overspeed_threshold_kmh", config.speed.overspeed_threshold_kmh)
+        ),
     )
     ocr = replace(
         config.ocr,
-        enabled=bool(camera.get("ocr_enabled", config.ocr.enabled)),
+        enabled=bool(_camera_setting(camera, "ocr_enabled", config.ocr.enabled)),
     )
     detection = replace(
         config.detection,
-        confidence_threshold=float(camera.get("confidence_threshold", config.detection.confidence_threshold)),
+        confidence_threshold=float(
+            _camera_setting(camera, "confidence_threshold", config.detection.confidence_threshold)
+        ),
         plate_confidence_threshold=float(
-            camera.get("plate_confidence_threshold", config.detection.plate_confidence_threshold)
+            _camera_setting(
+                camera, "plate_confidence_threshold", config.detection.plate_confidence_threshold
+            )
         ),
         char_confidence_threshold=float(
-            camera.get("char_confidence_threshold", config.detection.char_confidence_threshold)
+            _camera_setting(
+                camera, "char_confidence_threshold", config.detection.char_confidence_threshold
+            )
         ),
         helmet_confidence_threshold=float(
-            camera.get("helmet_confidence_threshold", config.detection.helmet_confidence_threshold)
+            _camera_setting(
+                camera, "helmet_confidence_threshold", config.detection.helmet_confidence_threshold
+            )
         ),
         helmet_stability_frames=int(
-            camera.get("helmet_stability_frames", config.detection.helmet_stability_frames)
+            _camera_setting(
+                camera, "helmet_stability_frames", config.detection.helmet_stability_frames
+            )
         ),
     )
     traffic_control = replace(
         config.traffic_control,
         roi_config_path=_resolve_roi_config_path(config, camera),
         stop_speed_threshold_px=float(
-            camera.get("stop_speed_threshold_px", config.traffic_control.stop_speed_threshold_px)
+            _camera_setting(
+                camera, "stop_speed_threshold_px", config.traffic_control.stop_speed_threshold_px
+            )
         ),
         stop_frames_threshold=int(
-            camera.get("stop_frames_threshold", config.traffic_control.stop_frames_threshold)
+            _camera_setting(
+                camera, "stop_frames_threshold", config.traffic_control.stop_frames_threshold
+            )
         ),
         stop_line_distance_px=float(
-            camera.get("stop_line_distance_px", config.traffic_control.stop_line_distance_px)
+            _camera_setting(
+                camera, "stop_line_distance_px", config.traffic_control.stop_line_distance_px
+            )
         ),
-        min_green_time=float(camera.get("min_green_time", config.traffic_control.min_green_time)),
-        max_green_time=float(camera.get("max_green_time", config.traffic_control.max_green_time)),
-        yellow_time=float(camera.get("yellow_time", config.traffic_control.yellow_time)),
+        min_green_time=float(
+            _camera_setting(camera, "min_green_time", config.traffic_control.min_green_time)
+        ),
+        max_green_time=float(
+            _camera_setting(camera, "max_green_time", config.traffic_control.max_green_time)
+        ),
+        yellow_time=float(
+            _camera_setting(camera, "yellow_time", config.traffic_control.yellow_time)
+        ),
         initial_active_lane=str(
-            camera.get("initial_active_lane", config.traffic_control.initial_active_lane)
+            _camera_setting(camera, "initial_active_lane", config.traffic_control.initial_active_lane)
         ),
         priority_queue_weight=float(
-            camera.get("priority_queue_weight", config.traffic_control.priority_queue_weight)
+            _camera_setting(
+                camera, "priority_queue_weight", config.traffic_control.priority_queue_weight
+            )
         ),
         priority_wait_weight=float(
-            camera.get("priority_wait_weight", config.traffic_control.priority_wait_weight)
+            _camera_setting(
+                camera, "priority_wait_weight", config.traffic_control.priority_wait_weight
+            )
         ),
-        fairness_weight=float(camera.get("fairness_weight", config.traffic_control.fairness_weight)),
+        fairness_weight=float(
+            _camera_setting(camera, "fairness_weight", config.traffic_control.fairness_weight)
+        ),
         max_priority_score=float(
-            camera.get("max_priority_score", config.traffic_control.max_priority_score)
+            _camera_setting(camera, "max_priority_score", config.traffic_control.max_priority_score)
         ),
     )
     config = replace(
@@ -632,20 +681,34 @@ def _intersection_signal_machine(intersection_id: str) -> SignalStateMachine:
         traffic_control = replace(
             traffic_control,
             initial_active_lane=str(
-                seed_camera.get("initial_active_lane", traffic_control.initial_active_lane)
+                _camera_setting(
+                    seed_camera, "initial_active_lane", traffic_control.initial_active_lane
+                )
             ),
-            min_green_time=float(seed_camera.get("min_green_time", traffic_control.min_green_time)),
-            max_green_time=float(seed_camera.get("max_green_time", traffic_control.max_green_time)),
-            yellow_time=float(seed_camera.get("yellow_time", traffic_control.yellow_time)),
+            min_green_time=float(
+                _camera_setting(seed_camera, "min_green_time", traffic_control.min_green_time)
+            ),
+            max_green_time=float(
+                _camera_setting(seed_camera, "max_green_time", traffic_control.max_green_time)
+            ),
+            yellow_time=float(
+                _camera_setting(seed_camera, "yellow_time", traffic_control.yellow_time)
+            ),
             priority_queue_weight=float(
-                seed_camera.get("priority_queue_weight", traffic_control.priority_queue_weight)
+                _camera_setting(
+                    seed_camera, "priority_queue_weight", traffic_control.priority_queue_weight
+                )
             ),
             priority_wait_weight=float(
-                seed_camera.get("priority_wait_weight", traffic_control.priority_wait_weight)
+                _camera_setting(
+                    seed_camera, "priority_wait_weight", traffic_control.priority_wait_weight
+                )
             ),
-            fairness_weight=float(seed_camera.get("fairness_weight", traffic_control.fairness_weight)),
+            fairness_weight=float(
+                _camera_setting(seed_camera, "fairness_weight", traffic_control.fairness_weight)
+            ),
             max_priority_score=float(
-                seed_camera.get("max_priority_score", traffic_control.max_priority_score)
+                _camera_setting(seed_camera, "max_priority_score", traffic_control.max_priority_score)
             ),
         )
 
@@ -791,6 +854,114 @@ def _save_snapshot(
     return image_url
 
 
+def _encode_snapshot_crop(frame, track) -> bytes | None:
+    if frame is None:
+        return None
+
+    frame_height, frame_width = frame.shape[:2]
+    bbox = track.bbox.clamp(frame_width, frame_height)
+    padding = max(bbox.width, bbox.height) * _VIOLATION_SCREENSHOT_PADDING_RATIO
+    padded_bbox = bbox.expand(padding).clamp(frame_width, frame_height)
+    x1, y1, x2, y2 = (int(value) for value in padded_bbox.as_tuple())
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return None
+
+    ok, encoded = cv2.imencode(".jpg", crop)
+    if not ok:
+        return None
+    return encoded.tobytes()
+
+
+def _sample_violation_frames(camera_id: str, context_time: float) -> list[tuple[float, object]]:
+    frame_buffer = _recent_frames_by_camera.get(camera_id)
+    if not frame_buffer:
+        return []
+
+    window_start = max(frame_buffer[0][0], context_time - _VIOLATION_SCREENSHOT_LOOKBACK_SECONDS)
+    candidates = [
+        (timestamp, frame)
+        for timestamp, frame in frame_buffer
+        if window_start <= timestamp <= context_time
+    ]
+    if not candidates:
+        return []
+    if len(candidates) <= _VIOLATION_SCREENSHOT_COUNT:
+        return candidates
+
+    last_index = len(candidates) - 1
+    sampled: list[tuple[float, object]] = []
+    seen_indices: set[int] = set()
+    for slot in range(_VIOLATION_SCREENSHOT_COUNT):
+        raw_index = round(slot * last_index / (_VIOLATION_SCREENSHOT_COUNT - 1))
+        index = min(last_index, max(0, raw_index))
+        while index in seen_indices and index < last_index:
+            index += 1
+        while index in seen_indices and index > 0:
+            index -= 1
+        if index in seen_indices:
+            continue
+        seen_indices.add(index)
+        sampled.append(candidates[index])
+    return sampled
+
+
+def _save_violation_snapshots(
+    *,
+    camera_id: str,
+    track,
+    context_time: float,
+    violation: str,
+) -> list[str]:
+    timestamp = datetime.fromtimestamp(context_time, tz=UTC)
+    timestamp_tag = timestamp.strftime("%H%M%S_%f")
+    location_slug = _slugify(_camera_location(camera_id))
+    owner_snapshot = _owner_snapshot(
+        camera_id=camera_id,
+        track=track,
+        seed=f"{camera_id}:{track.track_id}:{timestamp_tag}:{violation}",
+    )
+    saved_urls: list[str] = []
+    for index, (frame_timestamp, frame) in enumerate(_sample_violation_frames(camera_id, context_time), start=1):
+        encoded = _encode_snapshot_crop(frame, track)
+        if encoded is None:
+            continue
+
+        storage_key = (
+            f"violations/{timestamp:%Y/%m/%d}/{camera_id}-{location_slug}/"
+            f"{violation}/track-{track.track_id}/{timestamp_tag}_snapshot_{index}.jpg"
+        )
+        image_url = object_storage.put_bytes(
+            storage_key,
+            encoded,
+            content_type="image/jpeg",
+        )
+        metadata_key = storage_key.rsplit(".", maxsplit=1)[0] + ".json"
+        metadata_payload = {
+            "plate": track.plate_text,
+            "owner_name": owner_snapshot["owner_name"],
+            "owner_address": owner_snapshot["owner_address"],
+            "violation": violation,
+            "camera_id": camera_id,
+            "camera_location": _camera_location(camera_id),
+            "timestamp": _timestamp_to_iso(frame_timestamp),
+            "image_url": image_url,
+            "sequence": index,
+            "is_mock_data": owner_snapshot["is_mock_data"],
+        }
+        object_storage.put_bytes(
+            metadata_key,
+            json.dumps(metadata_payload, indent=2).encode("utf-8"),
+            content_type="application/json",
+        )
+        saved_urls.append(image_url)
+
+    return saved_urls
+
+
 def _remember_frame(camera_id: str, pipeline: TrafficMonitoringPipeline) -> None:
     context = pipeline.last_context
     frame = pipeline.last_frame
@@ -826,6 +997,13 @@ def _save_violation_clip(
 
     duration = max(selected_frames[-1][0] - selected_frames[0][0], 0.1)
     fps = min(24.0, max(6.0, (len(selected_frames) - 1) / duration))
+    clip_frames = list(selected_frames)
+    target_frame_count = max(2, int(round(fps * _VIOLATION_CLIP_TARGET_SECONDS)))
+    if len(clip_frames) < target_frame_count:
+        last_timestamp, last_frame = clip_frames[-1]
+        clip_frames.extend(
+            (last_timestamp, last_frame) for _ in range(target_frame_count - len(clip_frames))
+        )
     timestamp = datetime.fromtimestamp(context_time, tz=UTC)
     timestamp_tag = timestamp.strftime("%H%M%S_%f")
     location_slug = _slugify(_camera_location(camera_id))
@@ -836,7 +1014,7 @@ def _save_violation_clip(
 
     with tempfile.TemporaryDirectory(prefix=f"{camera_id}_{violation}_") as temp_dir:
         temp_path = Path(temp_dir)
-        for index, (_, frame) in enumerate(selected_frames):
+        for index, (_, frame) in enumerate(clip_frames):
             frame_path = temp_path / f"frame_{index:05d}.jpg"
             if not cv2.imwrite(str(frame_path), frame):
                 return None
@@ -886,6 +1064,43 @@ def _camera_location_link(camera_id: str) -> str | None:
     return str(location_link)
 
 
+def _camera_source_path(camera_id: str) -> Path:
+    camera = cameras.get(camera_id, {})
+    source = str(camera.get("source", "")).strip()
+    return Path(source)
+
+
+def _should_force_demo_accident(camera_id: str) -> bool:
+    camera = cameras.get(camera_id, {})
+    source_name = _camera_source_path(camera_id).stem.lower()
+    camera_tokens = (
+        str(camera_id).lower(),
+        str(camera.get("location", "")).lower(),
+        source_name,
+    )
+    return any(
+        marker in token
+        for marker in _DEMO_ACCIDENT_SOURCE_MARKERS
+        for token in camera_tokens
+    )
+
+
+def _vehicle_tracks_for_demo_accident(tracks: list[object]) -> list[object]:
+    vehicle_tracks = [
+        track
+        for track in tracks
+        if str(getattr(track, "label_name", "")).lower() in {"motorcycle", "car", "bus", "truck"}
+    ]
+    return sorted(
+        vehicle_tracks,
+        key=lambda track: (
+            int(getattr(track, "last_seen_frame", 0)) - int(getattr(track, "first_seen_frame", 0)),
+            float(getattr(getattr(track, "bbox", None), "area", 0.0)),
+        ),
+        reverse=True,
+    )
+
+
 def _owner_snapshot(*, camera_id: str, track, seed: str) -> dict[str, object]:
     fallback = vehicle_registry.choose_demo_record(seed=seed)
     return {
@@ -904,7 +1119,7 @@ def _build_violation_record(
     track,
     timestamp_seconds: float,
     violation_code: str,
-    image_path: str | None,
+    screenshot_urls: list[str],
     clip_url: str | None,
 ) -> dict[str, object]:
     location = _camera_location(camera_id)
@@ -935,6 +1150,9 @@ def _build_violation_record(
     owner_contact_number = str(owner_snapshot["owner_contact_number"])
     is_mock_data = bool(owner_snapshot["is_mock_data"])
     vehicle_type = str(track.metadata.get("owner_vehicle_type") or track.label_name)
+    padded_screenshots = [*screenshot_urls[:_VIOLATION_SCREENSHOT_COUNT]]
+    while len(padded_screenshots) < _VIOLATION_SCREENSHOT_COUNT:
+        padded_screenshots.append("")
     return {
         "id": str(uuid4()),
         "cameraId": camera_id,
@@ -951,9 +1169,9 @@ def _build_violation_record(
         "permAddress": owner_address,
         "timestamp": timestamp,
         "locationLink": _camera_location_link(camera_id) or "",
-        "screenshot1Url": image_path or "",
-        "screenshot2Url": "",
-        "screenshot3Url": "",
+        "screenshot1Url": padded_screenshots[0],
+        "screenshot2Url": padded_screenshots[1],
+        "screenshot3Url": padded_screenshots[2],
         "videoUrl": clip_url or source_video_url,
         "description": (
             f"{violation_titles.get(violation_code, 'Traffic violation')} detected at "
@@ -977,11 +1195,206 @@ def _build_violation_record(
     }
 
 
+def _build_accident_record(
+    *,
+    camera_id: str,
+    track,
+    other_track,
+    timestamp_seconds: float,
+    image_path: str | None,
+    clip_url: str | None,
+    evidence: dict[str, Any],
+) -> dict[str, object]:
+    location = _camera_location(camera_id)
+    source_path = Path(str(cameras.get(camera_id, {}).get("source", "")))
+    if source_path.parent.name == "surveillance":
+        source_video_url = f"/surveillance-media/{source_path.name}"
+    else:
+        source_video_url = f"/inputs/{source_path.name}"
+    now = _utc_now_iso()
+    timestamp = _timestamp_to_iso(timestamp_seconds)
+    owner_snapshot = _owner_snapshot(
+        camera_id=camera_id,
+        track=track,
+        seed=f"{camera_id}:{track.track_id}:{timestamp}:accident",
+    )
+    owner_name = str(owner_snapshot["owner_name"])
+    owner_address = str(owner_snapshot["owner_address"])
+    screenshot_url = image_path or ""
+    return {
+        "id": str(uuid4()),
+        "cameraId": camera_id,
+        "trackId": track.track_id,
+        "otherTrackId": other_track.track_id,
+        "title": "Potential Accident Detected",
+        "driverName": owner_name,
+        "age": 0,
+        "dob": "2000-01-01T00:00:00Z",
+        "bloodGroup": "Unknown",
+        "timestamp": timestamp,
+        "location": location,
+        "locationLink": _camera_location_link(camera_id) or "",
+        "vehicleType": track.label_name,
+        "otherVehicleType": other_track.label_name,
+        "licensePlate": (track.plate_text or "").upper(),
+        "otherLicensePlate": (other_track.plate_text or "").upper(),
+        "tempAddress": owner_address,
+        "permAddress": owner_address,
+        "screenshotUrl": image_path or "",
+        "screenshot1Url": screenshot_url,
+        "screenshot2Url": screenshot_url,
+        "screenshot3Url": screenshot_url,
+        "videoUrl": clip_url or source_video_url,
+        "description": (
+            f"Potential collision detected between track {track.track_id} ({track.label_name}) "
+            f"and track {other_track.track_id} ({other_track.label_name}) at {location}."
+        ),
+        "verified": False,
+        "createdAt": now,
+        "updatedAt": now,
+        "evidence": evidence,
+    }
+
+
+def _normalize_accident_record(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(record)
+    screenshot_url = str(
+        normalized.get("screenshot1Url")
+        or normalized.get("screenshotUrl")
+        or ""
+    )
+    temp_address = str(
+        normalized.get("tempAddress")
+        or normalized.get("ownerAddress")
+        or normalized.get("location")
+        or ""
+    )
+    normalized["title"] = str(normalized.get("title") or "Potential Accident Detected")
+    normalized["driverName"] = str(
+        normalized.get("driverName")
+        or normalized.get("ownerName")
+        or ""
+    )
+    normalized["age"] = int(normalized.get("age", 0) or 0)
+    normalized["dob"] = str(normalized.get("dob") or "2000-01-01T00:00:00Z")
+    normalized["bloodGroup"] = str(normalized.get("bloodGroup") or "Unknown")
+    normalized["licensePlate"] = str(normalized.get("licensePlate") or "")
+    normalized["tempAddress"] = temp_address
+    normalized["permAddress"] = str(normalized.get("permAddress") or temp_address)
+    normalized["timestamp"] = str(
+        normalized.get("timestamp")
+        or normalized.get("createdAt")
+        or _utc_now_iso()
+    )
+    normalized["locationLink"] = str(normalized.get("locationLink") or "")
+    normalized["screenshot1Url"] = screenshot_url
+    normalized["screenshot2Url"] = str(normalized.get("screenshot2Url") or screenshot_url)
+    normalized["screenshot3Url"] = str(normalized.get("screenshot3Url") or screenshot_url)
+    normalized["videoUrl"] = str(
+        normalized.get("videoUrl")
+        or normalized.get("sourceVideoUrl")
+        or ""
+    )
+    normalized["description"] = str(normalized.get("description") or "")
+    normalized["verified"] = bool(normalized.get("verified", False))
+    return normalized
+
+
+def _record_forced_demo_accident(
+    camera_id: str,
+    pipeline: TrafficMonitoringPipeline,
+    *,
+    timestamp: float,
+) -> bool:
+    if camera_id in _demo_accident_emitted_by_camera:
+        return False
+    if not _should_force_demo_accident(camera_id):
+        return False
+
+    context = pipeline.last_context
+    if context is None or context.frame_index < _DEMO_ACCIDENT_MIN_FRAME_INDEX:
+        return False
+
+    demo_tracks = _vehicle_tracks_for_demo_accident(pipeline.last_tracks)
+    if len(demo_tracks) < 2:
+        return False
+
+    track = demo_tracks[0]
+    other_track = demo_tracks[1]
+    event_key = (
+        camera_id,
+        timestamp,
+        min(track.track_id, other_track.track_id),
+        ViolationCode.ACCIDENT.value,
+    )
+    if event_key in _seen_event_keys:
+        return False
+    _seen_event_keys.add(event_key)
+    _demo_accident_emitted_by_camera.add(camera_id)
+
+    screenshot_urls = _save_violation_snapshots(
+        camera_id=camera_id,
+        track=track,
+        context_time=timestamp,
+        violation=ViolationCode.ACCIDENT.value,
+    )
+    image_path = screenshot_urls[0] if screenshot_urls else _save_snapshot(
+        camera_id=camera_id,
+        track=track,
+        context_time=timestamp,
+        violation=ViolationCode.ACCIDENT.value,
+        frame=pipeline.last_frame,
+    )
+    clip_url = _save_violation_clip(
+        camera_id=camera_id,
+        track=track,
+        context_time=timestamp,
+        violation=ViolationCode.ACCIDENT.value,
+    )
+    evidence = {
+        "demoOverride": True,
+        "reason": "Forced accident log for demo source video",
+        "pair_track_ids": [track.track_id, other_track.track_id],
+    }
+    events.append(
+        {
+            "camera": camera_id,
+            "time": timestamp,
+            "track_id": track.track_id,
+            "other_track_id": other_track.track_id,
+            "vehicle": track.label_name,
+            "other_vehicle": other_track.label_name,
+            "plate": track.plate_text,
+            "violation": ViolationCode.ACCIDENT.value,
+            "image": image_path,
+            "video": clip_url,
+            "location": _camera_location(camera_id),
+            "location_link": _camera_location_link(camera_id),
+            "storage_provider": object_storage.provider,
+            "is_mock_data": True,
+            "evidence": evidence,
+        }
+    )
+    repository.ingest_accident_event(
+        _build_accident_record(
+            camera_id=camera_id,
+            track=track,
+            other_track=other_track,
+            timestamp_seconds=timestamp,
+            image_path=image_path,
+            clip_url=clip_url,
+            evidence=evidence,
+        )
+    )
+    return True
+
+
 def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> None:
     context = pipeline.last_context
     if context is None:
         return
 
+    accident_recorded = False
     tracks_by_id = {track.track_id: track for track in pipeline.last_tracks}
     for track_id, findings in pipeline.last_new_findings.items():
         track = tracks_by_id.get(track_id)
@@ -991,18 +1404,31 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
             violation = finding.code.value
             if violation not in _api_event_codes:
                 continue
+            other_track_id = finding.evidence.get("other_track_id")
+            if violation == ViolationCode.ACCIDENT.value:
+                if not isinstance(other_track_id, int) or track_id > other_track_id:
+                    continue
             timestamp = round(context.timestamp_seconds, 3)
-            event_key = (camera_id, timestamp, track_id, violation)
+            event_track_id = other_track_id if violation == ViolationCode.ACCIDENT.value else track_id
+            event_key = (camera_id, timestamp, min(track_id, event_track_id), violation)
             if event_key in _seen_event_keys:
                 continue
             _seen_event_keys.add(event_key)
-            image_path = _save_snapshot(
+            screenshot_urls = _save_violation_snapshots(
+                camera_id=camera_id,
+                track=track,
+                context_time=timestamp,
+                violation=violation,
+            )
+            image_path = screenshot_urls[0] if screenshot_urls else _save_snapshot(
                 camera_id=camera_id,
                 track=track,
                 context_time=timestamp,
                 violation=violation,
                 frame=pipeline.last_frame,
             )
+            if not screenshot_urls and image_path:
+                screenshot_urls = [image_path]
             clip_url = _save_violation_clip(
                 camera_id=camera_id,
                 track=track,
@@ -1031,18 +1457,48 @@ def _record_new_events(camera_id: str, pipeline: TrafficMonitoringPipeline) -> N
                 "storage_provider": object_storage.provider,
                 "is_mock_data": owner_snapshot["is_mock_data"],
             }
+            if violation == ViolationCode.ACCIDENT.value and isinstance(other_track_id, int):
+                other_track = tracks_by_id.get(other_track_id)
+                if other_track is None:
+                    continue
+                event_payload["other_track_id"] = other_track_id
+                event_payload["other_vehicle"] = other_track.label_name
+                event_payload["evidence"] = finding.evidence
             events.append(event_payload)
-            repository.ingest_violation_event(
-                _build_violation_record(
-                    camera_id=camera_id,
-                    track=track,
-                    timestamp_seconds=timestamp,
-                    violation_code=violation,
-                    image_path=image_path,
-                    clip_url=clip_url,
-                ),
-                source_event_key=f"{camera_id}:{timestamp}:{track_id}:{violation}",
-            )
+            if violation == ViolationCode.ACCIDENT.value and isinstance(other_track_id, int):
+                other_track = tracks_by_id.get(other_track_id)
+                if other_track is None:
+                    continue
+                accident_recorded = True
+                repository.ingest_accident_event(
+                    _build_accident_record(
+                        camera_id=camera_id,
+                        track=track,
+                        other_track=other_track,
+                        timestamp_seconds=timestamp,
+                        image_path=image_path,
+                        clip_url=clip_url,
+                        evidence=finding.evidence,
+                    )
+                )
+            else:
+                repository.ingest_violation_event(
+                    _build_violation_record(
+                        camera_id=camera_id,
+                        track=track,
+                        timestamp_seconds=timestamp,
+                        violation_code=violation,
+                        screenshot_urls=screenshot_urls,
+                        clip_url=clip_url,
+                    ),
+                    source_event_key=f"{camera_id}:{timestamp}:{track_id}:{violation}",
+                )
+    if not accident_recorded:
+        _record_forced_demo_accident(
+            camera_id,
+            pipeline,
+            timestamp=round(context.timestamp_seconds, 3),
+        )
 
 
 def mjpeg_frame_generator(camera_id: str) -> Iterator[bytes]:
@@ -1327,7 +1783,12 @@ def verify_violation(violation_id: str, request: Request) -> JSONResponse:
 @app.get("/accidents")
 def list_accidents(request: Request) -> JSONResponse:
     admin = _require_admin(request, permission="can_view_accidents")
-    return JSONResponse(_filter_records_for_admin(admin, repository.list_accidents()))
+    return JSONResponse(
+        [
+            _normalize_accident_record(record)
+            for record in _filter_records_for_admin(admin, repository.list_accidents())
+        ]
+    )
 
 
 @app.get("/accidents/{accident_id}")
@@ -1337,7 +1798,7 @@ def get_accident(accident_id: str, request: Request) -> JSONResponse:
     if accident is None:
         raise HTTPException(status_code=404, detail=f"Unknown accident: {accident_id}")
     _guard_record_access(admin, accident, detail="Location access denied")
-    return JSONResponse(accident)
+    return JSONResponse(_normalize_accident_record(accident))
 
 
 @app.post("/accidents/{accident_id}/verify")
@@ -1350,6 +1811,7 @@ def verify_accident(accident_id: str, request: Request) -> JSONResponse:
     result = repository.verify_accident(accident_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Unknown accident: {accident_id}")
+    result["accident"] = _normalize_accident_record(result["accident"])
     return JSONResponse(result)
 
 

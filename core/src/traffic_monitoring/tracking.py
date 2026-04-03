@@ -397,6 +397,7 @@ class PlateRecognizer:
         self.ocr_reader = ocr_reader
         self.char_detector = char_detector
         self.vehicle_registry = vehicle_registry
+        self.plate_cache: dict[int, dict[str, object]] = {}
 
     def _debug(self, message: str) -> None:
         if self.config.runtime_options.ocr_debug:
@@ -418,7 +419,11 @@ class PlateRecognizer:
         self._enrich_track(frame, track)
 
     def _enrich_track(self, frame: np.ndarray, track: TrackState) -> None:
-        if self._can_skip_plate_ocr(track):
+        skip_reason = self._can_skip_plate_ocr(track)
+        if skip_reason is not None:
+            self._debug(
+                f"[plate-ocr] skipped track={track.track_id} frame={track.last_seen_frame} reason={skip_reason}"
+            )
             return
         track.metadata["plate_last_attempt_frame"] = track.last_seen_frame
         self._debug(
@@ -428,12 +433,14 @@ class PlateRecognizer:
         crop, origin = self._crop(frame, track.bbox)
         if crop.size == 0:
             track.mark_plate(text=None, confidence=None, state=PlateState.MISSING, bbox=None)
+            track.metadata["plate_last_processed_frame"] = track.last_seen_frame
             return
 
         detections = self.detector.predict(crop, verbose=False)
         if not detections:
             if track.plate_text is None:
                 track.mark_plate(text=None, confidence=None, state=PlateState.MISSING, bbox=None)
+            track.metadata["plate_last_processed_frame"] = track.last_seen_frame
             return
 
         best = max(detections, key=lambda detection: detection.confidence)
@@ -451,6 +458,8 @@ class PlateRecognizer:
             )
             self._attach_owner_metadata(track, smoothed_text)
             track.metadata["plate_last_success_frame"] = track.last_seen_frame
+            self._store_cached_plate(track, translated_bbox)
+            track.metadata["plate_last_processed_frame"] = track.last_seen_frame
             return
         track.mark_plate(
             text=None if track.plate_text is None else track.plate_text,
@@ -458,12 +467,21 @@ class PlateRecognizer:
             state=PlateState.UNREADABLE,
             bbox=translated_bbox,
         )
+        track.metadata["plate_last_processed_frame"] = track.last_seen_frame
 
     def _read_plate_text(self, image: np.ndarray) -> tuple[str | None, float | None]:
         if self.ocr_reader is None or image.size == 0:
             return None, None
+        if self.config.performance.performance_mode:
+            return self._read_full_plate_text(image)
         plate_format = self._detect_plate_format(image)
         self._debug(f"[plate-ocr] plate format: {plate_format}")
+
+        if plate_format == "modern":
+            modern_text, modern_conf = self._read_modern_plate_text(image)
+            if modern_text:
+                return modern_text, modern_conf
+            return None, modern_conf
 
         if plate_format == "traditional":
             top_region, bottom_region = self._split_plate_regions(image)
@@ -477,12 +495,6 @@ class PlateRecognizer:
             self._debug(f"[plate-ocr] structured bottom: {bottom_digits!r}")
             if bottom_digits:
                 return bottom_digits, mean_confidence
-        else:
-            modern_text, modern_conf = self._read_modern_plate_text(image)
-            if modern_text:
-                return modern_text, modern_conf
-
-        if plate_format == "traditional":
             segmented_text, segmented_conf = self._read_segmented_plate_text(image)
             if segmented_text:
                 return segmented_text, segmented_conf
@@ -819,26 +831,75 @@ class PlateRecognizer:
         track.metadata["plate_last_processed_frame"] = track.last_seen_frame
         return smoothed
 
-    def _can_skip_plate_ocr(self, track: TrackState) -> bool:
+    def _store_cached_plate(self, track: TrackState, bbox: BoundingBox | None) -> None:
+        self.plate_cache[track.track_id] = {
+            "text": track.plate_text,
+            "confidence": track.plate_confidence,
+            "bbox": bbox,
+            "stable": bool(track.metadata.get("plate_stable", False)),
+        }
+
+    def _reuse_cached_plate(self, track: TrackState) -> bool:
+        cached = self.plate_cache.get(track.track_id)
+        if not cached:
+            return False
+        text = cached.get("text")
+        if not isinstance(text, str) or not text:
+            return False
+        confidence = cached.get("confidence")
+        bbox = cached.get("bbox")
+        track.mark_plate(
+            text=text,
+            confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
+            state=PlateState.READABLE,
+            bbox=bbox if isinstance(bbox, BoundingBox) else track.plate_bbox,
+        )
+        return True
+
+    def _can_skip_plate_ocr(self, track: TrackState) -> str | None:
+        cooldown_frames = 10
+        last_processed = track.metadata.get("plate_last_processed_frame")
+        if (
+            isinstance(last_processed, int)
+            and (track.last_seen_frame - last_processed) <= cooldown_frames
+        ):
+            self._reuse_cached_plate(track)
+            return f"cooldown_{cooldown_frames}"
+
+        interval = max(1, self.config.ocr.frame_interval)
+        if (track.last_seen_frame % interval) != 0:
+            self._reuse_cached_plate(track)
+            return f"frame_skip_{interval}"
+
+        cached = self.plate_cache.get(track.track_id)
+        if cached and bool(cached.get("stable")):
+            self._reuse_cached_plate(track)
+            return "cached_stable_plate"
+
         interval = max(1, self.config.ocr.frame_interval)
         last_attempt = track.metadata.get("plate_last_attempt_frame")
         if isinstance(last_attempt, int) and (track.last_seen_frame - last_attempt) < interval:
-            return True
+            self._reuse_cached_plate(track)
+            return "recent_attempt"
 
         if not track.plate_text:
-            return False
+            return None
 
         last_success = track.metadata.get("plate_last_success_frame")
         cooldown = max(interval, self.config.ocr.stable_cooldown_frames)
         if isinstance(last_success, int) and (track.last_seen_frame - last_success) < cooldown:
-            return True
+            self._reuse_cached_plate(track)
+            return "recent_success"
 
         if not track.metadata.get("plate_stable", False):
-            return False
-        last_processed = track.metadata.get("plate_last_processed_frame")
-        if not isinstance(last_processed, int):
-            return False
-        return (track.last_seen_frame - last_processed) < cooldown
+            return None
+        stable_last_processed = track.metadata.get("plate_last_processed_frame")
+        if not isinstance(stable_last_processed, int):
+            return None
+        if (track.last_seen_frame - stable_last_processed) < cooldown:
+            self._reuse_cached_plate(track)
+            return "stable_cooldown"
+        return None
 
     def _attach_owner_metadata(self, track: TrackState, plate_text: str) -> None:
         if self.vehicle_registry is None:

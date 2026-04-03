@@ -24,6 +24,26 @@ function evidenceVideoLabel(violation: ViolationLog): string {
   return "Source clip";
 }
 
+function inferVideoMimeType(url: string): string | undefined {
+  const normalized = url.split("?")[0]?.toLowerCase() ?? "";
+  if (normalized.endsWith(".mp4") || normalized.endsWith(".m4v")) {
+    return "video/mp4";
+  }
+  if (normalized.endsWith(".webm")) {
+    return "video/webm";
+  }
+  if (normalized.endsWith(".mov")) {
+    return "video/quicktime";
+  }
+  if (normalized.endsWith(".mkv")) {
+    return "video/x-matroska";
+  }
+  if (normalized.endsWith(".avi")) {
+    return "video/x-msvideo";
+  }
+  return undefined;
+}
+
 function formatTimestamp(value: string) {
   const date = new Date(value);
   return {
@@ -240,7 +260,7 @@ export default function ViolationLogsSection({ canVerify = false }: { canVerify?
                         <img src={selected.videoUrl} alt={selected.title} className="w-full" />
                       ) : (
                         <video controls className="w-full">
-                          <source src={selected.videoUrl} type="video/mp4" />
+                          <source src={selected.videoUrl} type={inferVideoMimeType(selected.videoUrl)} />
                         </video>
                       )}
                     </div>

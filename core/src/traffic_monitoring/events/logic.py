@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from itertools import combinations
+from math import hypot
 from typing import Any, Iterable, Sequence
 
 from traffic_monitoring.config import TrafficMonitoringConfig
@@ -9,6 +11,7 @@ from traffic_monitoring.domain import FrameContext, HelmetState, PlateState, Tra
 
 
 class ViolationCode(str, Enum):
+    ACCIDENT = "accident"
     NO_HELMET = "no_helmet"
     OVERSPEED = "overspeed"
     WRONG_LANE = "wrong_lane"
@@ -210,6 +213,8 @@ class ViolationEngine:
         self.config = config
         self._current_findings: dict[int, list[ViolationFinding]] = {}
         self._new_findings: dict[int, list[ViolationFinding]] = {}
+        self._accident_pair_frames: dict[tuple[int, int], int] = {}
+        self._accident_pair_last_emit: dict[tuple[int, int], int] = {}
 
     @property
     def current_findings(self) -> dict[int, list[ViolationFinding]]:
@@ -234,12 +239,14 @@ class ViolationEngine:
 
         findings: list[ViolationFinding] = []
         new_findings: list[ViolationFinding] = []
+        accident_findings = findings_by_track(self._evaluate_accidents(context, tracks))
         for track in tracks:
             per_track = evaluate_track_violations(
                 track,
                 violation_context,
                 frame_index=context.frame_index,
             )
+            per_track.extend(accident_findings.get(track.track_id, ()))
             current_codes = {finding.code.value for finding in per_track}
             previous_codes = set(track.active_violation_codes)
             track.active_violation_codes = current_codes
@@ -267,6 +274,177 @@ class ViolationEngine:
                     matching.add(track.track_id)
                     break
         return matching
+
+    def _evaluate_accidents(
+        self,
+        context: FrameContext,
+        tracks: Sequence[TrackState],
+    ) -> list[ViolationFinding]:
+        if not self.config.accident.enabled:
+            self._accident_pair_frames.clear()
+            return []
+
+        active_pairs: set[tuple[int, int]] = set()
+        evidence_by_pair: dict[tuple[int, int], dict[str, Any]] = {}
+        vehicle_tracks = [track for track in tracks if _is_vehicle(track)]
+        for left, right in combinations(vehicle_tracks, 2):
+            candidate, evidence = self._is_accident_candidate(left, right)
+            pair_key = self._pair_key(left.track_id, right.track_id)
+            if not candidate or evidence is None:
+                continue
+            active_pairs.add(pair_key)
+            evidence_by_pair[pair_key] = evidence
+            self._accident_pair_frames[pair_key] = self._accident_pair_frames.get(pair_key, 0) + 1
+
+        stale_pairs = set(self._accident_pair_frames) - active_pairs
+        for pair_key in stale_pairs:
+            self._accident_pair_frames.pop(pair_key, None)
+
+        tracks_by_id = {track.track_id: track for track in vehicle_tracks}
+        findings: list[ViolationFinding] = []
+        for pair_key, frames in self._accident_pair_frames.items():
+            if frames < self.config.accident.confirmation_frames:
+                continue
+            last_emit = self._accident_pair_last_emit.get(pair_key)
+            if (
+                isinstance(last_emit, int)
+                and (context.frame_index - last_emit) <= self.config.accident.cooldown_frames
+            ):
+                continue
+            left_id, right_id = pair_key
+            left_track = tracks_by_id.get(left_id)
+            right_track = tracks_by_id.get(right_id)
+            evidence = evidence_by_pair.get(pair_key)
+            if left_track is None or right_track is None or evidence is None:
+                continue
+            self._accident_pair_last_emit[pair_key] = context.frame_index
+            findings.append(
+                self._accident_finding(
+                    track_id=left_id,
+                    other_track_id=right_id,
+                    frame_index=context.frame_index,
+                    evidence=evidence,
+                )
+            )
+            findings.append(
+                self._accident_finding(
+                    track_id=right_id,
+                    other_track_id=left_id,
+                    frame_index=context.frame_index,
+                    evidence=evidence,
+                )
+            )
+        return findings
+
+    def _is_accident_candidate(
+        self,
+        left: TrackState,
+        right: TrackState,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        min_age_frames = self.config.accident.min_track_age_frames
+        if (left.last_seen_frame - left.first_seen_frame) < min_age_frames:
+            return False, None
+        if (right.last_seen_frame - right.first_seen_frame) < min_age_frames:
+            return False, None
+
+        left_motion = self._motion_stats(left)
+        right_motion = self._motion_stats(right)
+        if left_motion is None or right_motion is None:
+            return False, None
+        left_previous, left_current = left_motion
+        right_previous, right_current = right_motion
+
+        left_centers = list(left.center_history)
+        right_centers = list(right.center_history)
+        if len(left_centers) < 3 or len(right_centers) < 3:
+            return False, None
+        previous_distance = hypot(
+            left_centers[-3][0] - right_centers[-3][0],
+            left_centers[-3][1] - right_centers[-3][1],
+        )
+        current_distance = left.bbox.distance_to_box(right.bbox)
+        closing_distance = previous_distance - current_distance
+
+        overlap_iou = left.bbox.iou(right.bbox)
+        coverage_ratio = max(left.bbox.coverage_ratio(right.bbox), right.bbox.coverage_ratio(left.bbox))
+        contact_distance_threshold = self.config.accident.contact_distance_ratio * max(
+            left.bbox.diagonal,
+            right.bbox.diagonal,
+            1.0,
+        )
+        contact_like = (
+            overlap_iou >= self.config.accident.min_overlap_iou
+            or coverage_ratio >= self.config.accident.min_coverage_ratio
+            or current_distance <= contact_distance_threshold
+        )
+        moving_before = (
+            left_previous >= self.config.accident.min_motion_px
+            or right_previous >= self.config.accident.min_motion_px
+        )
+        sudden_slowdown = (
+            self._is_sudden_slowdown(left_previous, left_current)
+            or self._is_sudden_slowdown(right_previous, right_current)
+        )
+        candidate = (
+            contact_like
+            and moving_before
+            and sudden_slowdown
+            and closing_distance >= self.config.accident.min_closing_distance_px
+        )
+        if not candidate:
+            return False, None
+        return True, {
+            "pair_track_ids": [left.track_id, right.track_id],
+            "overlap_iou": round(overlap_iou, 3),
+            "coverage_ratio": round(coverage_ratio, 3),
+            "closing_distance_px": round(closing_distance, 2),
+            "current_distance_px": round(current_distance, 2),
+            "left_motion_before_px": round(left_previous, 2),
+            "left_motion_after_px": round(left_current, 2),
+            "right_motion_before_px": round(right_previous, 2),
+            "right_motion_after_px": round(right_current, 2),
+        }
+
+    def _motion_stats(self, track: TrackState) -> tuple[float, float] | None:
+        centers = list(track.center_history)
+        if len(centers) < 5:
+            return None
+        displacements = [
+            hypot(current[0] - previous[0], current[1] - previous[1])
+            for previous, current in zip(centers, centers[1:])
+        ]
+        if len(displacements) < 4:
+            return None
+        previous_window = displacements[-4:-2]
+        current_window = displacements[-2:]
+        previous_motion = sum(previous_window) / len(previous_window)
+        current_motion = sum(current_window) / len(current_window)
+        return previous_motion, current_motion
+
+    def _is_sudden_slowdown(self, previous_motion: float, current_motion: float) -> bool:
+        if previous_motion < self.config.accident.min_motion_px:
+            return False
+        return current_motion <= max(2.0, previous_motion * self.config.accident.slowdown_ratio)
+
+    def _accident_finding(
+        self,
+        *,
+        track_id: int,
+        other_track_id: int,
+        frame_index: int,
+        evidence: dict[str, Any],
+    ) -> ViolationFinding:
+        return ViolationFinding(
+            code=ViolationCode.ACCIDENT,
+            severity=ViolationSeverity.CRITICAL,
+            message=f"Potential vehicle accident detected with track {other_track_id}",
+            track_id=track_id,
+            frame_index=frame_index,
+            evidence={**evidence, "other_track_id": other_track_id},
+        )
+
+    def _pair_key(self, left_track_id: int, right_track_id: int) -> tuple[int, int]:
+        return tuple(sorted((left_track_id, right_track_id)))
 
 
 def _point_in_polygon(point: tuple[int, int], polygon: Sequence[tuple[int, int]]) -> bool:

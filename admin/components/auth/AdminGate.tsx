@@ -42,13 +42,7 @@ function LoginPanel() {
   return (
     <div className="auth-shell">
       <form className="auth-card" onSubmit={handleSubmit}>
-        <p className="auth-kicker">Traffic Monitoring Admin</p>
-        <h1 className="auth-title">Sign in to continue</h1>
-        <p className="auth-copy">
-          Use the office account provided by the superadmin. Access is scoped by office permissions and surveillance location.
-        </p>
         <label className="auth-field">
-          <span>Username</span>
           <input
             value={username}
             onChange={(event) => setUsername(event.target.value)}
@@ -57,7 +51,6 @@ function LoginPanel() {
           />
         </label>
         <label className="auth-field">
-          <span>Password</span>
           <input
             value={password}
             onChange={(event) => setPassword(event.target.value)}

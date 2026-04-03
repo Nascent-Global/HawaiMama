@@ -55,6 +55,7 @@ type CameraDraft = {
 type Drafts = Record<string, CameraDraft>;
 type ModeFilter = "all" | SurveillanceCameraConfig["system_mode"];
 type PermissionKey = keyof AdminPermissions;
+type AdminPanelTab = "feeds" | "admins";
 
 type AdminDraft = {
   full_name: string;
@@ -425,6 +426,7 @@ function ModeButtons({
 
 export default function SurveillanceAdminPanel() {
   const { admin, logout } = useAdminSession();
+  const canManageFeeds = canAccessPermission(admin, "can_manage_feeds");
   const canManageAdmins = canAccessPermission(admin, "can_manage_admins");
   const [cameras, setCameras] = useState<SurveillanceCameraConfig[]>([]);
   const [drafts, setDrafts] = useState<Drafts>({});
@@ -448,6 +450,7 @@ export default function SurveillanceAdminPanel() {
   const [creatingAdmin, setCreatingAdmin] = useState(false);
   const [expandedCameraId, setExpandedCameraId] = useState<string | null>(null);
   const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<AdminPanelTab>("feeds");
   const [newAdmin, setNewAdmin] = useState<{
     username: string;
     full_name: string;
@@ -469,8 +472,36 @@ export default function SurveillanceAdminPanel() {
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
+  const availableTabs = useMemo<Array<{ key: AdminPanelTab; label: string; helper: string }>>(() => {
+    const tabs: Array<{ key: AdminPanelTab; label: string; helper: string }> = [];
+    if (canManageFeeds) {
+      tabs.push({
+        key: "feeds",
+        label: "Camera Configuration",
+        helper: "Registry, filters, uploads, and feed runtime settings.",
+      });
+    }
+    if (canManageAdmins) {
+      tabs.push({
+        key: "admins",
+        label: "Admin Accounts",
+        helper: "Office accounts, permissions, and location access.",
+      });
+    }
+    return tabs;
+  }, [canManageAdmins, canManageFeeds]);
+
+  useEffect(() => {
+    if (!availableTabs.some((tab) => tab.key === activeTab) && availableTabs[0]) {
+      setActiveTab(availableTabs[0].key);
+    }
+  }, [activeTab, availableTabs]);
 
   const refreshCameras = useCallback(async () => {
+    if (!canManageFeeds) {
+      setIsLoading(false);
+      return;
+    }
     try {
       setIsRefreshing(true);
       setIsLoading(true);
@@ -484,7 +515,7 @@ export default function SurveillanceAdminPanel() {
       setIsRefreshing(false);
       setIsLoading(false);
     }
-  }, []);
+  }, [canManageFeeds]);
 
   const refreshAccounts = useCallback(async () => {
     if (!canManageAdmins) {
@@ -507,9 +538,15 @@ export default function SurveillanceAdminPanel() {
     if (!admin) {
       return;
     }
-    void refreshCameras();
-    void refreshAccounts();
-  }, [admin, refreshAccounts, refreshCameras]);
+    if (canManageFeeds) {
+      void refreshCameras();
+    } else {
+      setIsLoading(false);
+    }
+    if (canManageAdmins) {
+      void refreshAccounts();
+    }
+  }, [admin, canManageAdmins, canManageFeeds, refreshAccounts, refreshCameras]);
 
   const visibleCameras = useMemo(() => {
     const query = deferredSearchQuery.trim().toLowerCase();
@@ -524,6 +561,14 @@ export default function SurveillanceAdminPanel() {
   const uniqueLocations = useMemo(
     () => Array.from(new Set(cameras.map((camera) => camera.location).filter(Boolean))).sort(),
     [cameras],
+  );
+  const selectedAccount = useMemo(
+    () => accounts.find((account) => account.id === expandedAccountId) ?? null,
+    [accounts, expandedAccountId],
+  );
+  const selectedAccountDraft = useMemo(
+    () => (selectedAccount ? accountDrafts[selectedAccount.id] ?? createAdminDrafts([selectedAccount])[selectedAccount.id] : null),
+    [accountDrafts, selectedAccount],
   );
 
   const dirtyCount = useMemo(
@@ -770,18 +815,20 @@ export default function SurveillanceAdminPanel() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="relative">
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search feeds, files, locations..."
-                className={`${textInputClass()} min-w-[280px] pl-3 pr-10`}
-              />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--gov-muted)]">
-                <SearchIcon />
-              </span>
-            </div>
+            {activeTab === "feeds" && canManageFeeds ? (
+              <div className="relative">
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search feeds, files, locations..."
+                  className={`${textInputClass()} min-w-[280px] pl-3 pr-10`}
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--gov-muted)]">
+                  <SearchIcon />
+                </span>
+              </div>
+            ) : null}
             {admin ? (
               <div className="flex items-center gap-3 border border-[var(--gov-line)] bg-white px-3 py-2">
                 <div className="text-right">
@@ -803,13 +850,17 @@ export default function SurveillanceAdminPanel() {
               type="button"
               className="inline-flex items-center gap-2 border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
               onClick={() => {
-                void refreshCameras();
-                void refreshAccounts();
+                if (activeTab === "feeds") {
+                  void refreshCameras();
+                }
+                if (activeTab === "admins") {
+                  void refreshAccounts();
+                }
               }}
-              disabled={isRefreshing || accountsLoading}
+              disabled={activeTab === "feeds" ? isRefreshing : accountsLoading}
             >
               <RefreshIcon />
-              <span>{isRefreshing || accountsLoading ? "Refreshing..." : "Refresh"}</span>
+              <span>{activeTab === "feeds" ? (isRefreshing ? "Refreshing..." : "Refresh") : accountsLoading ? "Refreshing..." : "Refresh"}</span>
             </button>
             <Link
               href="/"
@@ -822,13 +873,15 @@ export default function SurveillanceAdminPanel() {
       </header>
 
       <div className="gov-scrollbar min-h-0 overflow-auto px-4 py-4 sm:px-5">
-        <div className="grid gap-3 md:grid-cols-5">
-          <StatCell label="Total feeds" value={cameras.length} />
-          <StatCell label="Active feeds" value={activeFeedCount} />
-          <StatCell label="Enforcement" value={enforcementCount} />
-          <StatCell label="Traffic mode" value={trafficCount} />
-          <StatCell label="Unsaved drafts" value={dirtyCount} />
-        </div>
+        {activeTab === "feeds" && canManageFeeds ? (
+          <div className="grid gap-3 md:grid-cols-5">
+            <StatCell label="Total feeds" value={cameras.length} />
+            <StatCell label="Active feeds" value={activeFeedCount} />
+            <StatCell label="Enforcement" value={enforcementCount} />
+            <StatCell label="Traffic mode" value={trafficCount} />
+            <StatCell label="Unsaved drafts" value={dirtyCount} />
+          </div>
+        ) : null}
 
         {error ? (
           <div className="mt-4 border border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-4 py-3 text-sm text-[var(--gov-red-dark)]">{error}</div>
@@ -837,73 +890,97 @@ export default function SurveillanceAdminPanel() {
           <div className="mt-4 border border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] px-4 py-3 text-sm text-[var(--gov-red-dark)]">{accountsError}</div>
         ) : null}
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <div className="space-y-4">
-            <SectionFrame kicker="New Source" title="Add Surveillance Feed">
-              <div className="grid gap-4">
-                <Field label="Surveillance location">
-                  <input
-                    value={uploadLocation}
-                    onChange={(event) => setUploadLocation(event.target.value)}
-                    className={textInputClass()}
-                    placeholder="Lakeside Gate 2"
-                  />
-                </Field>
-                <Field label="Default mode">
-                  <ModeButtons value={uploadMode} onChange={setUploadMode} />
-                </Field>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv"
-                  className="hidden"
-                  onChange={(event) => setSelectedUploadFile(event.target.files?.[0] ?? null)}
-                />
-                <div className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-3 py-3 text-sm text-[var(--gov-muted)]">
-                  <div>{selectedUploadFile?.name || "No video file selected"}</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    Choose video
-                  </button>
-                  <button
-                    type="button"
-                    className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
-                    onClick={() => void handleUpload()}
-                    disabled={isUploading || !selectedUploadFile || !uploadLocation.trim()}
-                  >
-                    {isUploading ? "Adding..." : "Add feed"}
-                  </button>
-                </div>
-              </div>
-            </SectionFrame>
-
-            <SectionFrame kicker="Feed Scope" title="Registry Filter">
-              <div className="grid gap-2">
-                {(["all", "enforcement_mode", "traffic_management_mode"] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`border px-3 py-3 text-left text-sm font-semibold uppercase tracking-[0.1em] ${
-                      modeFilter === value
-                        ? "border-[var(--gov-blue)] bg-[var(--gov-highlight)] text-[var(--gov-blue)]"
-                        : "border-[var(--gov-line)] bg-white text-[var(--gov-muted)]"
-                    }`}
-                    onClick={() => setModeFilter(value)}
-                  >
-                    {value === "all" ? "All feeds" : value === "enforcement_mode" ? "Enforcement mode" : "Traffic mode"}
-                  </button>
-                ))}
-              </div>
-            </SectionFrame>
+        {availableTabs.length > 1 ? (
+          <div className="mt-4 border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] p-2">
+            <div className="grid gap-2 md:grid-cols-2">
+              {availableTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={`border px-4 py-3 text-left ${
+                    activeTab === tab.key
+                      ? "border-[var(--gov-blue)] bg-white text-[var(--gov-blue)]"
+                      : "border-[var(--gov-line)] bg-transparent text-[var(--gov-muted)]"
+                  }`}
+                  onClick={() => setActiveTab(tab.key)}
+                >
+                  <div className="text-sm font-semibold uppercase tracking-[0.12em]">{tab.label}</div>
+                  <div className="mt-1 text-xs">{tab.helper}</div>
+                </button>
+              ))}
+            </div>
           </div>
+        ) : null}
+
+        <div className={`mt-4 ${activeTab === "feeds" && canManageFeeds ? "grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]" : "space-y-4"}`}>
+          {activeTab === "feeds" && canManageFeeds ? (
+            <div className="space-y-4">
+              <SectionFrame kicker="New Source" title="Add Surveillance Feed">
+                <div className="grid gap-4">
+                  <Field label="Surveillance location">
+                    <input
+                      value={uploadLocation}
+                      onChange={(event) => setUploadLocation(event.target.value)}
+                      className={textInputClass()}
+                      placeholder="Lakeside Gate 2"
+                    />
+                  </Field>
+                  <Field label="Default mode">
+                    <ModeButtons value={uploadMode} onChange={setUploadMode} />
+                  </Field>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="video/*,.mp4,.mov,.m4v,.webm,.avi,.mkv"
+                    className="hidden"
+                    onChange={(event) => setSelectedUploadFile(event.target.files?.[0] ?? null)}
+                  />
+                  <div className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-3 py-3 text-sm text-[var(--gov-muted)]">
+                    <div>{selectedUploadFile?.name || "No video file selected"}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Choose video
+                    </button>
+                    <button
+                      type="button"
+                      className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
+                      onClick={() => void handleUpload()}
+                      disabled={isUploading || !selectedUploadFile || !uploadLocation.trim()}
+                    >
+                      {isUploading ? "Adding..." : "Add feed"}
+                    </button>
+                  </div>
+                </div>
+              </SectionFrame>
+
+              <SectionFrame kicker="Feed Scope" title="Registry Filter">
+                <div className="grid gap-2">
+                  {(["all", "enforcement_mode", "traffic_management_mode"] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`border px-3 py-3 text-left text-sm font-semibold uppercase tracking-[0.1em] ${
+                        modeFilter === value
+                          ? "border-[var(--gov-blue)] bg-[var(--gov-highlight)] text-[var(--gov-blue)]"
+                          : "border-[var(--gov-line)] bg-white text-[var(--gov-muted)]"
+                      }`}
+                      onClick={() => setModeFilter(value)}
+                    >
+                      {value === "all" ? "All feeds" : value === "enforcement_mode" ? "Enforcement mode" : "Traffic mode"}
+                    </button>
+                  ))}
+                </div>
+              </SectionFrame>
+            </div>
+          ) : null}
 
           <div className="space-y-4">
-            {canManageAdmins ? (
+            {activeTab === "admins" && canManageAdmins ? (
               <SectionFrame kicker="Office Access" title="Admin Accounts">
                 <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
                   <div className="space-y-4 border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
@@ -1037,187 +1114,215 @@ export default function SurveillanceAdminPanel() {
                     </button>
                   </div>
 
-                  <div className="min-h-[240px] border border-[var(--gov-line)] bg-white">
-                    <div className="grid grid-cols-[minmax(0,1fr)_120px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">
-                      <span>Account</span>
-                      <span>Status</span>
-                      <span>Actions</span>
-                    </div>
-                    {accountsLoading ? <div className="px-4 py-6 text-sm text-[var(--gov-muted)]">Loading admin accounts...</div> : null}
-                    <div className="divide-y divide-[var(--gov-line)]">
-                      {accounts.map((account) => {
-                        const draft = accountDrafts[account.id] ?? createAdminDrafts([account])[account.id];
-                        const expanded = expandedAccountId === account.id;
-                        return (
-                          <div key={account.id}>
-                            <div className="grid items-center gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_120px_120px]">
-                              <div>
-                                <div className="text-sm font-semibold text-[var(--gov-ink)]">{account.username}</div>
-                                <div className="mt-1 text-xs text-[var(--gov-muted)]">
-                                  {draft.full_name} | {account.role === "superadmin" ? "Superadmin" : "Office admin"}
-                                </div>
-                              </div>
-                              <div>
-                                <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
-                                  draft.is_active
-                                    ? "border-emerald-700 bg-emerald-50 text-emerald-800"
-                                    : "border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] text-[var(--gov-red-dark)]"
-                                }`}>
-                                  {draft.is_active ? "Active" : "Disabled"}
-                                </span>
-                              </div>
-                              <div className="flex justify-start md:justify-end">
-                                <button
-                                  type="button"
-                                  className="border border-[var(--gov-line-strong)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
-                                  onClick={() => setExpandedAccountId(expanded ? null : account.id)}
-                                >
-                                  {expanded ? "Hide" : "Manage"}
-                                </button>
-                              </div>
-                            </div>
-                            {expanded ? (
-                              <div className="border-t border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
-                                <div className="grid gap-4 xl:grid-cols-2">
-                                  <Field label="Display name">
-                                    <input
-                                      value={draft.full_name}
-                                      onChange={(event) =>
-                                        setAccountDrafts((current) => ({
-                                          ...current,
-                                          [account.id]: { ...draft, full_name: event.target.value },
-                                        }))
-                                      }
-                                      className={textInputClass()}
-                                    />
-                                  </Field>
-                                  <Field label="Reset password">
-                                    <input
-                                      type="password"
-                                      value={draft.password}
-                                      onChange={(event) =>
-                                        setAccountDrafts((current) => ({
-                                          ...current,
-                                          [account.id]: { ...draft, password: event.target.value },
-                                        }))
-                                      }
-                                      placeholder="Leave blank to keep current"
-                                      className={textInputClass()}
-                                    />
-                                  </Field>
-                                </div>
-
-                                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                                  <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
-                                    <input
-                                      type="checkbox"
-                                      className={checkboxClass()}
-                                      checked={draft.is_active}
-                                      onChange={(event) =>
-                                        setAccountDrafts((current) => ({
-                                          ...current,
-                                          [account.id]: { ...draft, is_active: event.target.checked },
-                                        }))
-                                      }
-                                    />
-                                    <span>Account is active</span>
-                                  </label>
-                                  <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
-                                    <input
-                                      type="checkbox"
-                                      className={checkboxClass()}
-                                      checked={draft.role === "superadmin" || draft.all_locations}
-                                      disabled={draft.role === "superadmin"}
-                                      onChange={(event) =>
-                                        setAccountDrafts((current) => ({
-                                          ...current,
-                                          [account.id]: { ...draft, all_locations: event.target.checked },
-                                        }))
-                                      }
-                                    />
-                                    <span>All surveillance locations</span>
-                                  </label>
-                                </div>
-
-                                {draft.role !== "superadmin" && !draft.all_locations ? (
-                                  <div className="mt-4">
-                                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Allowed locations</div>
-                                    <div className="grid gap-2 sm:grid-cols-2">
-                                      {uniqueLocations.map((location) => (
-                                        <label key={`${account.id}-${location}`} className="flex items-center gap-3 border border-[var(--gov-line)] bg-white px-3 py-2 text-sm text-[var(--gov-ink)]">
-                                          <input
-                                            type="checkbox"
-                                            className={checkboxClass()}
-                                            checked={draft.allowed_locations.includes(location)}
-                                            onChange={() => handleDraftLocationToggle(account.id, location)}
-                                          />
-                                          <span>{location}</span>
-                                        </label>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : null}
-
-                                <div className="mt-4">
-                                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Permissions</div>
-                                  <div className="grid gap-2 xl:grid-cols-2">
-                                    {PERMISSION_META.map((permission) => (
-                                      <label key={`${account.id}-${permission.key}`} className="flex gap-3 border border-[var(--gov-line)] bg-white px-3 py-3 text-sm text-[var(--gov-ink)]">
-                                        <input
-                                          type="checkbox"
-                                          className={`${checkboxClass()} mt-0.5`}
-                                          checked={draft.role === "superadmin" || draft.permissions[permission.key]}
-                                          disabled={draft.role === "superadmin"}
-                                          onChange={(event) => handleDraftPermissionToggle(account.id, permission.key, event.target.checked)}
-                                        />
-                                        <span>
-                                          <strong className="block">{permission.label}</strong>
-                                          <span className="mt-1 block text-xs text-[var(--gov-muted)]">{permission.helper}</span>
-                                        </span>
-                                      </label>
-                                    ))}
+                  <div className="grid gap-4 2xl:grid-cols-[minmax(0,0.7fr)_minmax(340px,0.9fr)]">
+                    <div className="min-h-[240px] border border-[var(--gov-line)] bg-white">
+                      <div className="grid grid-cols-[minmax(0,1fr)_120px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)]">
+                        <span>Account</span>
+                        <span>Status</span>
+                        <span>Actions</span>
+                      </div>
+                      {accountsLoading ? <div className="px-4 py-6 text-sm text-[var(--gov-muted)]">Loading admin accounts...</div> : null}
+                      <div className="divide-y divide-[var(--gov-line)]">
+                        {accounts.map((account) => {
+                          const draft = accountDrafts[account.id] ?? createAdminDrafts([account])[account.id];
+                          const expanded = expandedAccountId === account.id;
+                          return (
+                            <div key={account.id} className={expanded ? "bg-[var(--gov-paper-alt)]" : undefined}>
+                              <div className="grid items-center gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_120px_120px]">
+                                <div>
+                                  <div className="text-sm font-semibold text-[var(--gov-ink)]">{account.username}</div>
+                                  <div className="mt-1 text-xs text-[var(--gov-muted)]">
+                                    {draft.full_name} | {account.role === "superadmin" ? "Superadmin" : "Office admin"}
                                   </div>
                                 </div>
-
-                                <div className="mt-4 flex justify-end">
+                                <div>
+                                  <span className={`inline-flex border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                                    draft.is_active
+                                      ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                                      : "border-[var(--gov-red)] bg-[rgba(193,39,45,0.08)] text-[var(--gov-red-dark)]"
+                                  }`}>
+                                    {draft.is_active ? "Active" : "Disabled"}
+                                  </span>
+                                </div>
+                                <div className="flex justify-start md:justify-end">
                                   <button
                                     type="button"
-                                    className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
-                                    disabled={savingAdminId === account.id}
-                                    onClick={() => void handleSaveAdmin(account)}
+                                    className={`border px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] ${
+                                      expanded
+                                        ? "border-[var(--gov-blue)] bg-white text-[var(--gov-blue)]"
+                                        : "border-[var(--gov-line-strong)] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                                    }`}
+                                    onClick={() => setExpandedAccountId(expanded ? null : account.id)}
                                   >
-                                    {savingAdminId === account.id ? "Saving..." : "Save access"}
+                                    {expanded ? "Selected" : "Manage"}
                                   </button>
                                 </div>
                               </div>
-                            ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="self-start border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
+                      {selectedAccount && selectedAccountDraft ? (
+                        <>
+                          <div className="flex items-center justify-between gap-3 border-b border-[var(--gov-line)] pb-3">
+                            <div>
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Selected account</div>
+                              <div className="mt-1 text-sm font-semibold text-[var(--gov-ink)]">{selectedAccount.username}</div>
+                            </div>
+                            <button
+                              type="button"
+                              className="border border-[var(--gov-line-strong)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+                              onClick={() => setExpandedAccountId(null)}
+                            >
+                              Clear
+                            </button>
                           </div>
-                        );
-                      })}
+
+                          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                            <Field label="Display name">
+                              <input
+                                value={selectedAccountDraft.full_name}
+                                onChange={(event) =>
+                                  setAccountDrafts((current) => ({
+                                    ...current,
+                                    [selectedAccount.id]: { ...selectedAccountDraft, full_name: event.target.value },
+                                  }))
+                                }
+                                className={textInputClass()}
+                              />
+                            </Field>
+                            <Field label="Reset password">
+                              <input
+                                type="password"
+                                value={selectedAccountDraft.password}
+                                onChange={(event) =>
+                                  setAccountDrafts((current) => ({
+                                    ...current,
+                                    [selectedAccount.id]: { ...selectedAccountDraft, password: event.target.value },
+                                  }))
+                                }
+                                placeholder="Leave blank to keep current"
+                                className={textInputClass()}
+                              />
+                            </Field>
+                          </div>
+
+                          <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
+                              <input
+                                type="checkbox"
+                                className={checkboxClass()}
+                                checked={selectedAccountDraft.is_active}
+                                onChange={(event) =>
+                                  setAccountDrafts((current) => ({
+                                    ...current,
+                                    [selectedAccount.id]: { ...selectedAccountDraft, is_active: event.target.checked },
+                                  }))
+                                }
+                              />
+                              <span>Account is active</span>
+                            </label>
+                            <label className="flex items-center gap-3 text-sm text-[var(--gov-ink)]">
+                              <input
+                                type="checkbox"
+                                className={checkboxClass()}
+                                checked={selectedAccountDraft.role === "superadmin" || selectedAccountDraft.all_locations}
+                                disabled={selectedAccountDraft.role === "superadmin"}
+                                onChange={(event) =>
+                                  setAccountDrafts((current) => ({
+                                    ...current,
+                                    [selectedAccount.id]: { ...selectedAccountDraft, all_locations: event.target.checked },
+                                  }))
+                                }
+                              />
+                              <span>All surveillance locations</span>
+                            </label>
+                          </div>
+
+                          {selectedAccountDraft.role !== "superadmin" && !selectedAccountDraft.all_locations ? (
+                            <div className="mt-4">
+                              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Allowed locations</div>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                {uniqueLocations.map((location) => (
+                                  <label key={`${selectedAccount.id}-${location}`} className="flex items-center gap-3 border border-[var(--gov-line)] bg-white px-3 py-2 text-sm text-[var(--gov-ink)]">
+                                    <input
+                                      type="checkbox"
+                                      className={checkboxClass()}
+                                      checked={selectedAccountDraft.allowed_locations.includes(location)}
+                                      onChange={() => handleDraftLocationToggle(selectedAccount.id, location)}
+                                    />
+                                    <span>{location}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="mt-4">
+                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Permissions</div>
+                            <div className="grid gap-2 xl:grid-cols-2">
+                              {PERMISSION_META.map((permission) => (
+                                <label key={`${selectedAccount.id}-${permission.key}`} className="flex gap-3 border border-[var(--gov-line)] bg-white px-3 py-3 text-sm text-[var(--gov-ink)]">
+                                  <input
+                                    type="checkbox"
+                                    className={`${checkboxClass()} mt-0.5`}
+                                    checked={selectedAccountDraft.role === "superadmin" || selectedAccountDraft.permissions[permission.key]}
+                                    disabled={selectedAccountDraft.role === "superadmin"}
+                                    onChange={(event) => handleDraftPermissionToggle(selectedAccount.id, permission.key, event.target.checked)}
+                                  />
+                                  <span>
+                                    <strong className="block">{permission.label}</strong>
+                                    <span className="mt-1 block text-xs text-[var(--gov-muted)]">{permission.helper}</span>
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 flex justify-end">
+                            <button
+                              type="button"
+                              className="bg-[var(--gov-blue)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)] disabled:opacity-60"
+                              disabled={savingAdminId === selectedAccount.id}
+                              onClick={() => void handleSaveAdmin(selectedAccount)}
+                            >
+                              {savingAdminId === selectedAccount.id ? "Saving..." : "Save access"}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex min-h-[240px] items-center justify-center text-sm text-[var(--gov-muted)]">
+                          Select an account to manage its access settings.
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               </SectionFrame>
             ) : null}
 
-            <SectionFrame
-              kicker="Feed Register"
-              title="Camera Configuration"
-              actions={
-                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
-                  {visibleCameras.length} visible feeds
-                </span>
-              }
-            >
-              {isLoading ? <div className="py-6 text-sm text-[var(--gov-muted)]">Loading surveillance registry...</div> : null}
-              {!isLoading && visibleCameras.length === 0 ? (
-                <div className="border border-dashed border-[var(--gov-line-strong)] bg-[var(--gov-paper-alt)] px-4 py-8 text-sm text-[var(--gov-muted)]">
-                  No feeds match the current search or mode filter.
-                </div>
-              ) : null}
+            {activeTab === "feeds" && canManageFeeds ? (
+              <SectionFrame
+                kicker="Feed Register"
+                title="Camera Configuration"
+                actions={
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">
+                    {visibleCameras.length} visible feeds
+                  </span>
+                }
+              >
+                {isLoading ? <div className="py-6 text-sm text-[var(--gov-muted)]">Loading surveillance registry...</div> : null}
+                {!isLoading && visibleCameras.length === 0 ? (
+                  <div className="border border-dashed border-[var(--gov-line-strong)] bg-[var(--gov-paper-alt)] px-4 py-8 text-sm text-[var(--gov-muted)]">
+                    No feeds match the current search or mode filter.
+                  </div>
+                ) : null}
 
-              {!isLoading && visibleCameras.length > 0 ? (
-                <div className="border border-[var(--gov-line)] bg-white">
+                {!isLoading && visibleCameras.length > 0 ? (
+                  <div className="border border-[var(--gov-line)] bg-white">
                   <div className="hidden grid-cols-[140px_minmax(0,1fr)_150px_120px_120px] border-b border-[var(--gov-line-strong)] bg-[var(--gov-highlight)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--gov-muted)] md:grid">
                     <span>Feed ID</span>
                     <span>Location and File</span>
@@ -1439,9 +1544,10 @@ export default function SurveillanceAdminPanel() {
                       );
                     })}
                   </div>
-                </div>
-              ) : null}
-            </SectionFrame>
+                  </div>
+                ) : null}
+              </SectionFrame>
+            ) : null}
           </div>
         </div>
       </div>

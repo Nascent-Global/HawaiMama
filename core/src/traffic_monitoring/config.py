@@ -66,6 +66,22 @@ class OCRConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class AccidentConfig:
+    """Heuristic thresholds for vehicle accident detection."""
+
+    enabled: bool = True
+    min_track_age_frames: int = 6
+    min_overlap_iou: float = 0.03
+    min_coverage_ratio: float = 0.12
+    contact_distance_ratio: float = 0.55
+    min_closing_distance_px: float = 20.0
+    min_motion_px: float = 6.0
+    slowdown_ratio: float = 0.45
+    confirmation_frames: int = 3
+    cooldown_frames: int = 45
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     """Non-path runtime options."""
 
@@ -85,6 +101,7 @@ class RuntimeConfig:
 class PerformanceConfig:
     """Configuration for runtime throughput controls."""
 
+    performance_mode: bool = False
     frame_skip: int = 1
     resolution: tuple[int, int] | None = None
     fps_limit: float | None = 12.0
@@ -196,6 +213,7 @@ class TrafficMonitoringConfig:
     wrong_lane: WrongLaneConfig
     face_capture: FaceCaptureConfig
     ocr: OCRConfig
+    accident: AccidentConfig
     output: OutputConfig
 
     @property
@@ -254,6 +272,7 @@ def build_default_config(root: Path | None = None) -> TrafficMonitoringConfig:
         wrong_lane=WrongLaneConfig(),
         face_capture=FaceCaptureConfig(),
         ocr=OCRConfig(),
+        accident=AccidentConfig(),
         output=OutputConfig(),
     )
 
@@ -332,6 +351,9 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
         width_text, height_text = str(resolution_arg).lower().split("x", maxsplit=1)
         resolution = (int(width_text), int(height_text))
     performance = PerformanceConfig(
+        performance_mode=bool(
+            getattr(namespace, "performance_mode", base.performance.performance_mode)
+        ),
         frame_skip=max(1, int(getattr(namespace, "frame_skip", base.performance.frame_skip))),
         resolution=resolution,
         fps_limit=(
@@ -362,6 +384,7 @@ def config_from_namespace(args: object, root: Path | None = None) -> TrafficMoni
         wrong_lane=base.wrong_lane,
         face_capture=base.face_capture,
         ocr=ocr,
+        accident=base.accident,
         output=OutputConfig(annotated_video_name=output_path.name, violations_filename=base.output.violations_filename),
     )
     return apply_input_overrides(config)
@@ -408,6 +431,7 @@ __all__ = [
     "Polygon",
     "DEFAULT_DISPLAY_LABELS",
     "DEFAULT_TRACKED_CLASSES",
+    "AccidentConfig",
     "DetectionConfig",
     "FaceCaptureConfig",
     "ModelPaths",

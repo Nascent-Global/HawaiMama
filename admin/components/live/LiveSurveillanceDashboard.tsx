@@ -61,6 +61,14 @@ function FeedMedia({
     );
   }
 
+  if (!detail && systemEnabled) {
+    return (
+      <div className="flex h-full items-center justify-center bg-slate-900 px-6 text-center text-sm text-white/70">
+        Processed output unavailable for this feed.
+      </div>
+    );
+  }
+
   if (!detail && feed.previewVideoUrl) {
     return (
       <video
@@ -98,9 +106,11 @@ function FeedMedia({
 function FeedTile({
   feed,
   systemEnabled,
+  onOpen,
 }: {
   feed: SurveillanceFeed;
   systemEnabled: boolean;
+  onOpen: (feedId: string) => void;
 }) {
   return (
     <article className="overflow-hidden border border-[var(--gov-line)] bg-white shadow-[0_10px_28px_rgba(18,35,61,0.08)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_34px_rgba(18,35,61,0.12)]">
@@ -117,9 +127,13 @@ function FeedTile({
         </span>
       </div>
 
-      <div className="aspect-video bg-black">
+      <button
+        type="button"
+        onClick={() => onOpen(feed.id)}
+        className="block aspect-video w-full bg-black text-left"
+      >
         <FeedMedia feed={feed} systemEnabled={systemEnabled} />
-      </div>
+      </button>
 
       <div className="grid gap-3 border-t border-[var(--gov-line)] px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0 space-y-2">
@@ -134,6 +148,13 @@ function FeedTile({
         </div>
 
         <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => onOpen(feed.id)}
+            className="border border-[var(--gov-blue)] bg-[var(--gov-blue)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white hover:bg-[var(--gov-blue-dark)]"
+          >
+            Open Monitor
+          </button>
           {feed.videoUrl ? (
             <a
               href={feed.videoUrl}
@@ -157,6 +178,113 @@ function FeedTile({
         </div>
       </div>
     </article>
+  );
+}
+
+function FeedMonitor({
+  feed,
+  systemEnabled,
+  onClose,
+}: {
+  feed: SurveillanceFeed;
+  systemEnabled: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <section className="overflow-hidden border border-[var(--gov-line-strong)] bg-white shadow-[0_16px_34px_rgba(18,35,61,0.12)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4 sm:px-5">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-red)]">
+            Focus Monitor
+          </div>
+          <h2 className="mt-1 text-lg font-bold uppercase tracking-[0.08em] text-[var(--gov-ink)]">
+            {feed.id}
+          </h2>
+          <div className="mt-2 text-sm text-[var(--gov-muted)]">
+            {systemEnabled ? "Processed detection view for the selected feed." : "Raw source view for the selected feed."}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)] hover:border-[var(--gov-blue)] hover:text-[var(--gov-blue)]"
+        >
+          Back to Grid
+        </button>
+      </div>
+
+      <div className="grid gap-4 px-4 py-4 sm:px-5 xl:grid-cols-[minmax(0,1.3fr)_320px]">
+        <div className="space-y-3">
+          <div className="aspect-video overflow-hidden border border-[var(--gov-line)] bg-black">
+            <FeedMedia feed={feed} systemEnabled={systemEnabled} detail />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">View Mode</div>
+              <div className="mt-2 text-sm font-semibold text-[var(--gov-ink)]">
+                {systemEnabled ? "Processed system output" : "Raw surveillance feed"}
+              </div>
+            </div>
+            <div className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Location</div>
+              <div className="mt-2 text-sm font-semibold text-[var(--gov-ink)]">{feed.location}</div>
+            </div>
+            <div className="border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-muted)]">Address</div>
+              <div className="mt-2 text-sm text-[var(--gov-ink)]">{feed.address}</div>
+            </div>
+          </div>
+        </div>
+
+        <aside className="space-y-3 border border-[var(--gov-line)] bg-[var(--gov-paper-alt)] px-4 py-4">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-blue)]">Feed Actions</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {feed.videoUrl ? (
+                <a
+                  href={feed.videoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-blue)] hover:border-[var(--gov-blue)]"
+                >
+                  Open Source Video
+                </a>
+              ) : null}
+              <a
+                href={feed.stream_video}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-blue)] hover:border-[var(--gov-blue)]"
+              >
+                Open Processed Stream
+              </a>
+              {feed.locationLink ? (
+                <a
+                  href={feed.locationLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border border-[var(--gov-line-strong)] bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--gov-blue)] hover:border-[var(--gov-blue)]"
+                >
+                  Open Map
+                </a>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--gov-line)] pt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--gov-blue)]">Monitor Notes</div>
+            <div className="mt-3 space-y-2 text-sm leading-6 text-[var(--gov-muted)]">
+              <p>
+                Processed mode uses the backend detection stream for this specific camera. Keeping this monitor open is what drives live violation generation for the selected feed.
+              </p>
+              <p>
+                Raw mode shows the uploaded surveillance source directly so you can compare the original video against the annotated system output.
+              </p>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
   );
 }
 
@@ -224,6 +352,7 @@ export default function LiveSurveillanceDashboard() {
   const { admin, logout } = useAdminSession();
   const [nav, setNav] = useState<NavKey>("live");
   const [feeds, setFeeds] = useState<SurveillanceFeed[]>([]);
+  const [selectedFeedId, setSelectedFeedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [systemEnabled, setSystemEnabled] = useState(false);
   const [isLoadingFeeds, setIsLoadingFeeds] = useState(true);
@@ -287,6 +416,22 @@ export default function LiveSurveillanceDashboard() {
     if (!query) return feeds;
     return feeds.filter((feed) => [feed.address, feed.location, feed.id].some((value) => value.toLowerCase().includes(query)));
   }, [deferredSearchQuery, feeds]);
+
+  const selectedFeed = useMemo(
+    () => feeds.find((feed) => feed.id === selectedFeedId) ?? null,
+    [feeds, selectedFeedId],
+  );
+
+  const openFeedMonitor = (feedId: string) => {
+    setSelectedFeedId(feedId);
+    setSystemEnabled(true);
+  };
+
+  useEffect(() => {
+    if (selectedFeedId && !selectedFeed) {
+      setSelectedFeedId(null);
+    }
+  }, [selectedFeed, selectedFeedId]);
 
   return (
     <DashboardShell
@@ -421,10 +566,23 @@ export default function LiveSurveillanceDashboard() {
 
               {!isLoadingFeeds && !feedError ? (
                 <>
+                  {selectedFeed ? (
+                    <FeedMonitor
+                      feed={selectedFeed}
+                      systemEnabled={systemEnabled}
+                      onClose={() => setSelectedFeedId(null)}
+                    />
+                  ) : null}
+
                   {filteredFeeds.length > 0 ? (
                     <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                       {filteredFeeds.map((feed) => (
-                        <FeedTile key={feed.id} feed={feed} systemEnabled={systemEnabled} />
+                        <FeedTile
+                          key={feed.id}
+                          feed={feed}
+                          systemEnabled={systemEnabled}
+                          onOpen={openFeedMonitor}
+                        />
                       ))}
                     </div>
                   ) : (

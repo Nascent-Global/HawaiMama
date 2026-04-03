@@ -105,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Process every Nth frame for better throughput.",
     )
     parser.add_argument(
+        "--performance-mode",
+        action="store_true",
+        help="Enable fast mode: skip alternate frames and use full-plate OCR only.",
+    )
+    parser.add_argument(
         "--resolution",
         type=str,
         default="",
